@@ -1,11 +1,22 @@
 {
-    "name": "ollama-vscode",
-    "displayName": "Ollama Chat",
+    "name": "ollama-chat-vscode",
+    "displayName": "Ollama Local Chat",
     "description": "Chat with Ollama locally in VS Code",
     "version": "0.0.1",
     "engines": {
         "vscode": "^1.74.0"
     },
+    "publisher": "MauroKrekels",
+    "license": "MIT",
+    "galleryBanner": {
+        "color": "#000000",
+        "theme": "dark"
+    },
+    "keywords": [
+        "ollama",
+        "chat",
+        "vscode"
+    ],
     "categories": [
         "Other"
     ],
