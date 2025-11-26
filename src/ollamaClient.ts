@@ -6,6 +6,7 @@ import { URL } from 'url';
 export interface OllamaMessage {
     role: 'user' | 'assistant' | 'system';
     content: string;
+    thinking?: string;
 }
 
 export interface OllamaResponse {
@@ -107,10 +108,7 @@ export class OllamaClient {
         }
     }
 
-    async chat(messages: OllamaMessage[], onChunk?: (chunk: string) => void): Promise<string> {
-        const config = vscode.workspace.getConfiguration('ollama');
-        const model = config.get<string>('model', this.model);
-
+    async pullModel(modelName: string, onProgress?: (progress: any) => void): Promise<void> {
         return new Promise((resolve, reject) => {
             let baseUrl = this.baseUrl.trim();
             if (!baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
@@ -121,7 +119,104 @@ export class OllamaClient {
             const httpModule = isHttps ? https : http;
 
             const requestBody = JSON.stringify({
-                model: model,
+                name: modelName,
+                stream: true,
+            });
+
+            const port = baseUrlObj.port ? parseInt(baseUrlObj.port, 10) : (isHttps ? 443 : 80);
+
+            const options = {
+                host: baseUrlObj.host,
+                hostname: baseUrlObj.hostname,
+                port: port,
+                path: '/api/pull',
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(requestBody),
+                },
+            };
+
+            const req = httpModule.request(options, (res) => {
+                if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+                    let buffer = '';
+
+                    res.on('data', (chunk: Buffer) => {
+                        buffer += chunk.toString();
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop() || '';
+
+                        for (const line of lines) {
+                            if (line.trim()) {
+                                try {
+                                    const data = JSON.parse(line);
+                                    if (onProgress) {
+                                        onProgress(data);
+                                    }
+                                    if (data.status === 'success') {
+                                        resolve();
+                                        return;
+                                    }
+                                } catch (e) {
+                                }
+                            }
+                        }
+                    });
+
+                    res.on('end', () => {
+                        if (buffer.trim()) {
+                            try {
+                                const data = JSON.parse(buffer);
+                                if (onProgress) {
+                                    onProgress(data);
+                                }
+                            } catch (e) {
+                            }
+                        }
+                        resolve();
+                    });
+
+                    res.on('error', (error: Error) => {
+                        reject(error);
+                    });
+                } else {
+                    let errorBody = '';
+                    res.on('data', (chunk: Buffer) => {
+                        errorBody += chunk.toString();
+                    });
+                    res.on('end', () => {
+                        reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}${errorBody ? ' - ' + errorBody : ''}`));
+                    });
+                }
+            });
+
+            req.on('error', (error) => {
+                reject(new Error(`Cannot connect to Ollama. ${error.message}`));
+            });
+
+            req.write(requestBody);
+            req.end();
+        });
+    }
+
+    chat(messages: OllamaMessage[], model?: string, onChunk?: (chunk: string) => void, onThinking?: (thinking: string) => void): { promise: Promise<{ content: string, thinking?: string }>, abort: () => void } {
+        const config = vscode.workspace.getConfiguration('ollama');
+        const chatModel = model || config.get<string>('model', this.model);
+
+        let request: http.ClientRequest | null = null;
+        let isAborted = false;
+
+        const promise = new Promise<{ content: string, thinking?: string }>((resolve, reject) => {
+            let baseUrl = this.baseUrl.trim();
+            if (!baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
+                baseUrl = 'http://' + baseUrl;
+            }
+            const baseUrlObj = new URL(baseUrl);
+            const isHttps = baseUrlObj.protocol === 'https:';
+            const httpModule = isHttps ? https : http;
+
+            const requestBody = JSON.stringify({
+                model: chatModel,
                 messages: messages,
                 stream: true,
             });
@@ -140,29 +235,85 @@ export class OllamaClient {
                 },
             };
 
-            const req = httpModule.request(options, (res) => {
+            request = httpModule.request(options, (res) => {
                 if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
                     let fullResponse = '';
+                    let fullThinking = '';
                     let buffer = '';
+                    let inThinkingTag = false;
+                    let thinkingBuffer = '';
 
                     res.on('data', (chunk: Buffer) => {
+                        if (isAborted) {
+                            return;
+                        }
                         buffer += chunk.toString();
                         const lines = buffer.split('\n');
                         buffer = lines.pop() || '';
 
                         for (const line of lines) {
+                            if (isAborted) {
+                                return;
+                            }
                             if (line.trim()) {
                                 try {
                                     const data = JSON.parse(line);
                                     if (data.message?.content) {
-                                        const content = data.message.content;
-                                        fullResponse += content;
-                                        if (onChunk) {
-                                            onChunk(content);
+                                        let content = data.message.content;
+
+                                        while (content.length > 0) {
+                                            if (isAborted) {
+                                                return;
+                                            }
+                                            if (!inThinkingTag) {
+                                                const thinkStart = content.indexOf('<think>');
+                                                if (thinkStart !== -1) {
+                                                    fullResponse += content.substring(0, thinkStart);
+                                                    if (onChunk && thinkStart > 0) {
+                                                        onChunk(content.substring(0, thinkStart));
+                                                    }
+                                                    inThinkingTag = true;
+                                                    content = content.substring(thinkStart + '<think>'.length);
+                                                    thinkingBuffer = '';
+                                                } else {
+                                                    fullResponse += content;
+                                                    if (onChunk) {
+                                                        onChunk(content);
+                                                    }
+                                                    content = '';
+                                                }
+                                            } else {
+                                                const thinkEnd = content.indexOf('</think>');
+                                                if (thinkEnd !== -1) {
+                                                    thinkingBuffer += content.substring(0, thinkEnd);
+                                                    fullThinking += thinkingBuffer;
+                                                    if (onThinking && thinkingBuffer) {
+                                                        onThinking(fullThinking);
+                                                    }
+                                                    inThinkingTag = false;
+                                                    thinkingBuffer = '';
+                                                    content = content.substring(thinkEnd + '</think>'.length);
+                                                } else {
+                                                    thinkingBuffer += content;
+                                                    if (onThinking && thinkingBuffer) {
+                                                        onThinking(fullThinking + thinkingBuffer);
+                                                    }
+                                                    content = '';
+                                                }
+                                            }
                                         }
                                     }
                                     if (data.done) {
-                                        resolve(fullResponse);
+                                        if (isAborted) {
+                                            return;
+                                        }
+                                        if (inThinkingTag && thinkingBuffer) {
+                                            fullThinking += thinkingBuffer;
+                                            if (onThinking && thinkingBuffer) {
+                                                onThinking(fullThinking);
+                                            }
+                                        }
+                                        resolve({ content: fullResponse, thinking: fullThinking || undefined });
                                         return;
                                     }
                                 } catch (e) {
@@ -172,19 +323,67 @@ export class OllamaClient {
                     });
 
                     res.on('end', () => {
+                        if (isAborted) {
+                            return;
+                        }
                         if (buffer.trim()) {
                             try {
                                 const data = JSON.parse(buffer);
                                 if (data.message?.content) {
-                                    fullResponse += data.message.content;
-                                    if (onChunk) {
-                                        onChunk(data.message.content);
+                                    let content = data.message.content;
+
+                                    while (content.length > 0) {
+                                        if (isAborted) {
+                                            return;
+                                        }
+                                        if (!inThinkingTag) {
+                                            const thinkStart = content.indexOf('<think>');
+                                            if (thinkStart !== -1) {
+                                                fullResponse += content.substring(0, thinkStart);
+                                                if (onChunk && thinkStart > 0) {
+                                                    onChunk(content.substring(0, thinkStart));
+                                                }
+                                                inThinkingTag = true;
+                                                content = content.substring(thinkStart + '<think>'.length);
+                                                thinkingBuffer = '';
+                                            } else {
+                                                fullResponse += content;
+                                                if (onChunk) {
+                                                    onChunk(content);
+                                                }
+                                                content = '';
+                                            }
+                                        } else {
+                                            const thinkEnd = content.indexOf('</think>');
+                                            if (thinkEnd !== -1) {
+                                                thinkingBuffer += content.substring(0, thinkEnd);
+                                                fullThinking += thinkingBuffer;
+                                                if (onThinking && thinkingBuffer) {
+                                                    onThinking(fullThinking);
+                                                }
+                                                inThinkingTag = false;
+                                                thinkingBuffer = '';
+                                                content = content.substring(thinkEnd + '</think>'.length);
+                                            } else {
+                                                thinkingBuffer += content;
+                                                if (onThinking && thinkingBuffer) {
+                                                    onThinking(fullThinking + thinkingBuffer);
+                                                }
+                                                content = '';
+                                            }
+                                        }
                                     }
                                 }
                             } catch (e) {
                             }
                         }
-                        resolve(fullResponse);
+                        if (inThinkingTag && thinkingBuffer) {
+                            fullThinking += thinkingBuffer;
+                            if (onThinking && thinkingBuffer) {
+                                onThinking(fullThinking);
+                            }
+                        }
+                        resolve({ content: fullResponse, thinking: fullThinking || undefined });
                     });
 
                     res.on('error', (error: Error) => {
@@ -196,7 +395,7 @@ export class OllamaClient {
                         errorBody += chunk.toString();
                     });
                     res.on('end', () => {
-                        const errorMsg = res.statusCode === 404 
+                        const errorMsg = res.statusCode === 404
                             ? `Endpoint not found. Make sure Ollama is running and the API endpoint is correct. (HTTP ${res.statusCode})`
                             : `HTTP ${res.statusCode}: ${res.statusMessage}${errorBody ? ' - ' + errorBody : ''}`;
                         reject(new Error(errorMsg));
@@ -204,12 +403,25 @@ export class OllamaClient {
                 }
             });
 
-            req.on('error', (error) => {
-                reject(new Error(`Cannot connect to Ollama. Make sure Ollama is running locally. ${error.message}`));
+            request.on('error', (error: Error) => {
+                if (!isAborted) {
+                    reject(new Error(`Cannot connect to Ollama. Make sure Ollama is running locally. ${error.message}`));
+                }
             });
 
-            req.write(requestBody);
-            req.end();
+            request.write(requestBody);
+            request.end();
         });
+
+        return {
+            promise,
+            abort: () => {
+                isAborted = true;
+                if (request) {
+                    request.destroy();
+                }
+                promise.catch(() => { });
+            }
+        };
     }
 }

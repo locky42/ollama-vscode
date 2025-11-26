@@ -3,7 +3,7 @@ import { ChatPanel } from './chatPanel';
 
 export function activate(context: vscode.ExtensionContext) {
     const disposable = vscode.commands.registerCommand('ollama.openChat', () => {
-        ChatPanel.createOrShow(context.extensionUri);
+        ChatPanel.createOrShow(context.extensionUri, context);
     });
 
     context.subscriptions.push(disposable);
