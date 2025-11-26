@@ -481,7 +481,6 @@ export class ChatPanel {
     public dispose() {
         ChatPanel.currentPanel = undefined;
 
-        // Clear any pending save timeout
         if (this._saveTimeout) {
             clearTimeout(this._saveTimeout);
             this._saveTimeout = null;
@@ -847,33 +846,18 @@ export class ChatPanel {
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 12px;
+            font-size: 14px;
             opacity: 0.7;
             transition: opacity 0.2s;
-            position: relative;
-            width: 20px;
-            height: 20px;
-        }
-
-        .sidebar-toggle::before {
-            content: '';
-            position: absolute;
-            width: 12px;
-            height: 12px;
-            border: 1px solid currentColor;
-            border-right: none;
-            border-top: none;
-            transform: rotate(-45deg);
-            transition: transform 0.2s ease;
-        }
-
-        .sidebar-toggle.collapsed::before {
-            transform: rotate(135deg);
         }
 
         .sidebar-toggle:hover {
             opacity: 1;
             background-color: var(--vscode-toolbar-hoverBackground);
+        }
+
+        .sidebar-toggle.collapsed {
+            transform: rotate(180deg);
         }
 
         .header-left {
@@ -1372,7 +1356,9 @@ export class ChatPanel {
     <div class="main-container">
         <div class="header">
             <div class="header-left">
-                <button id="sidebarToggle" class="sidebar-toggle" title="Toggle Sidebar"></button>
+                <button id="sidebarToggle" class="sidebar-toggle" title="Toggle Sidebar">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-left-icon lucide-chevron-left"><path d="m15 18-6-6 6-6"/></svg>
+                </button>
                 <h3>Ollama Chat</h3>
                 <button id="newChatButton" class="new-chat-button" title="New Chat">New Chat</button>
             </div>
@@ -1431,10 +1417,10 @@ export class ChatPanel {
             if (sidebarToggle) {
                 if (sidebarCollapsed) {
                     sidebarToggle.classList.add('collapsed');
-                    sidebarToggle.textContent = '▶';
+                    sidebarToggle.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-right-icon lucide-chevron-right"><path d="m9 18 6-6-6-6"/></svg>';
                 } else {
                     sidebarToggle.classList.remove('collapsed');
-                    sidebarToggle.textContent = '◀';
+                    sidebarToggle.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-left-icon lucide-chevron-left"><path d="m15 18-6-6 6-6"/></svg>';
                 }
             }
             vscode.postMessage({
@@ -1903,11 +1889,11 @@ export class ChatPanel {
                     if (sidebarCollapsed) {
                         chatSidebar.classList.add('collapsed');
                         sidebarToggle.classList.add('collapsed');
-                        sidebarToggle.textContent = '▶';
+                        sidebarToggle.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-right-icon lucide-chevron-right"><path d="m9 18 6-6-6-6"/></svg>';
                     } else {
                         chatSidebar.classList.remove('collapsed');
                         sidebarToggle.classList.remove('collapsed');
-                        sidebarToggle.textContent = '◀';
+                        sidebarToggle.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-left-icon lucide-chevron-left"><path d="m15 18-6-6 6-6"/></svg>';
                     }
                     break;
             }
