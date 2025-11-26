@@ -22,6 +22,9 @@ export class ChatPanel {
     private _currentRequest: { abort: () => void } | null = null;
     private _messageIdCounter: number = 0;
     private _currentChatId: string | null = null;
+    private _operationLocks: Set<string> = new Set();
+    private _saveTimeout: NodeJS.Timeout | null = null;
+    private readonly _saveDebounceMs: number = 500;
 
     private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, context: vscode.ExtensionContext) {
         this._panel = panel;
@@ -67,7 +70,9 @@ export class ChatPanel {
                     case 'selectModel':
                         this._selectedModel = message.model;
                         this._context.workspaceState.update('ollama.selectedModel', message.model);
-                        this.saveCurrentChat();
+                        if (this._currentChatId && this._messages.length > 0) {
+                            await this.saveCurrentChat();
+                        }
                         return;
                     case 'stopMessage':
                         if (this._currentRequest) {
@@ -86,6 +91,16 @@ export class ChatPanel {
                         return;
                     case 'getChatHistory':
                         this.loadChatHistory();
+                        return;
+                    case 'toggleSidebar':
+                        this._context.workspaceState.update('ollama.sidebarCollapsed', message.collapsed);
+                        return;
+                    case 'getSidebarState':
+                        const sidebarCollapsed = this._context.workspaceState.get<boolean>('ollama.sidebarCollapsed', false);
+                        this._panel.webview.postMessage({
+                            command: 'setSidebarState',
+                            collapsed: sidebarCollapsed
+                        });
                         return;
                 }
             },
@@ -106,35 +121,104 @@ export class ChatPanel {
         return trimmed.substring(0, maxLength - 3) + '...';
     }
 
-    private async saveCurrentChat() {
+    private generateUniqueChatId(): string {
+        const timestamp = Date.now().toString(36);
+        const randomPart = Math.random().toString(36).substring(2, 15);
+        const additionalRandom = Math.random().toString(36).substring(2, 15);
+        return `chat_${timestamp}_${randomPart}_${additionalRandom}`;
+    }
+
+    private isOperationLocked(operation: string): boolean {
+        return this._operationLocks.has(operation);
+    }
+
+    private lockOperation(operation: string): void {
+        this._operationLocks.add(operation);
+    }
+
+    private unlockOperation(operation: string): void {
+        this._operationLocks.delete(operation);
+    }
+
+    private async withOperationLock<T>(operation: string, fn: () => Promise<T>): Promise<T> {
+        if (this.isOperationLocked(operation)) {
+            throw new Error(`Operation '${operation}' is already in progress`);
+        }
+
+        this.lockOperation(operation);
+        try {
+            return await fn();
+        } finally {
+            this.unlockOperation(operation);
+        }
+    }
+
+    private async saveCurrentChat(force: boolean = false) {
         if (this._messages.length === 0) {
             return;
         }
 
-        const chats = this.getSavedChats();
-        const now = Date.now();
-
-        if (!this._currentChatId) {
-            this._currentChatId = `chat_${now}_${Math.random().toString(36).substr(2, 9)}`;
+        if (force) {
+            await this.performSave();
+            return;
         }
 
-        const firstUserMessage = this._messages.find(m => m.role === 'user');
-        const chatName = firstUserMessage
-            ? this.generateChatName(firstUserMessage.content)
-            : `Chat ${new Date(now).toLocaleString()}`;
+        if (this._saveTimeout) {
+            clearTimeout(this._saveTimeout);
+        }
 
-        const savedChat: SavedChat = {
-            id: this._currentChatId,
-            name: chatName,
-            messages: [...this._messages],
-            model: this._selectedModel,
-            createdAt: chats[this._currentChatId]?.createdAt || now,
-            updatedAt: now
-        };
+        this._saveTimeout = setTimeout(async () => {
+            await this.performSave();
+            this._saveTimeout = null;
+        }, this._saveDebounceMs);
+    }
 
-        chats[this._currentChatId] = savedChat;
-        await this._context.globalState.update('ollama.savedChats', chats);
-        this.loadChatHistory();
+    private async performSave() {
+        try {
+            const chats = this.getSavedChats();
+            const now = Date.now();
+            let isNewChat = false;
+
+            if (!this._currentChatId) {
+                this._currentChatId = this.generateUniqueChatId();
+                isNewChat = true;
+            }
+
+            const firstUserMessage = this._messages.find(m => m.role === 'user');
+            const chatName = firstUserMessage
+                ? this.generateChatName(firstUserMessage.content)
+                : `Chat ${new Date(now).toLocaleString()}`;
+
+            const existingChat = chats[this._currentChatId];
+
+            const hasChanges = !existingChat ||
+                existingChat.messages.length !== this._messages.length ||
+                existingChat.model !== this._selectedModel ||
+                existingChat.name !== chatName ||
+                JSON.stringify(existingChat.messages) !== JSON.stringify(this._messages);
+
+            if (!isNewChat && !hasChanges) {
+                return;
+            }
+
+            const savedChat: SavedChat = {
+                id: this._currentChatId,
+                name: chatName,
+                messages: [...this._messages],
+                model: this._selectedModel,
+                createdAt: existingChat?.createdAt || now,
+                updatedAt: now
+            };
+
+            chats[this._currentChatId] = savedChat;
+            await this._context.globalState.update('ollama.savedChats', chats);
+
+            if (isNewChat) {
+                this.loadChatHistory();
+            }
+        } catch (error) {
+            console.error('Failed to save chat:', error);
+        }
     }
 
     private getSavedChats(): { [key: string]: SavedChat } {
@@ -146,6 +230,10 @@ export class ChatPanel {
         const chat = chats[chatId];
 
         if (!chat) {
+            this._panel.webview.postMessage({
+                command: 'error',
+                message: 'Chat not found'
+            });
             return;
         }
 
@@ -153,26 +241,27 @@ export class ChatPanel {
         this._messages = [...chat.messages];
         this._selectedModel = chat.model;
 
-        let userMessageCount = 0;
-        this._messages.forEach(msg => {
-            if (msg.role === 'user') {
-                userMessageCount++;
-            }
-        });
-        this._messageIdCounter = userMessageCount;
+        this._messageIdCounter = this._messages
+            .filter(msg => msg.role === 'user')
+            .length;
 
         this._context.workspaceState.update('ollama.selectedModel', chat.model);
 
-        let tempCounter = 0;
-        this._panel.webview.postMessage({
-            command: 'loadChatMessages',
-            messages: this._messages.map((msg) => ({
+        const messagesWithIds = this._messages.map((msg, index) => {
+            const messageId = msg.role === 'user' ? index : undefined;
+            return {
                 role: msg.role,
                 content: msg.content,
                 thinking: msg.thinking,
-                id: msg.role === 'user' ? tempCounter++ : undefined
-            })),
-            model: chat.model
+                id: messageId
+            };
+        });
+
+        this._panel.webview.postMessage({
+            command: 'loadChatMessages',
+            messages: messagesWithIds,
+            model: chat.model,
+            nextMessageId: this._messageIdCounter
         });
 
         const models = await this._ollamaClient.listModels();
@@ -184,39 +273,164 @@ export class ChatPanel {
     }
 
     private async deleteChat(chatId: string) {
-        const chats = this.getSavedChats();
-        const updatedChats = { ...chats };
-        delete updatedChats[chatId];
-        await this._context.globalState.update('ollama.savedChats', updatedChats);
-
-        if (this._currentChatId === chatId) {
-            this._currentChatId = null;
-            this._messages = [];
-            this._messageIdCounter = 0;
-            this._panel.webview.postMessage({ command: 'clearChat' });
+        if (!chatId || typeof chatId !== 'string' || chatId.trim() === '') {
+            this._panel.webview.postMessage({
+                command: 'error',
+                message: 'Invalid chat ID provided'
+            });
+            return;
         }
 
-        this.loadChatHistory();
+        const operationKey = `delete_${chatId}`;
+
+        try {
+            await this.withOperationLock(operationKey, async () => {
+                const chats = this.getSavedChats();
+
+                if (!chats[chatId]) {
+                    this._panel.webview.postMessage({
+                        command: 'error',
+                        message: 'Chat not found or already deleted'
+                    });
+                    await this.refreshChatHistory();
+                    return;
+                }
+
+                const wasCurrentChat = this._currentChatId === chatId;
+
+                const updatedChats = { ...chats };
+                delete updatedChats[chatId];
+
+                await this._context.globalState.update('ollama.savedChats', updatedChats);
+
+                if (wasCurrentChat) {
+                    this._currentChatId = null;
+                    this._messages = [];
+                    this._messageIdCounter = 0;
+                    this._panel.webview.postMessage({ command: 'clearChat' });
+                }
+
+                await this.refreshChatHistory();
+
+                this._panel.webview.postMessage({
+                    command: 'chatDeleted',
+                    chatId: chatId,
+                    wasCurrentChat: wasCurrentChat
+                });
+            });
+        } catch (error: any) {
+            if (error.message?.includes('already in progress')) {
+                this._panel.webview.postMessage({
+                    command: 'error',
+                    message: 'Delete operation is already in progress for this chat. Please wait and try again.'
+                });
+                return;
+            }
+
+            console.error('Error deleting chat:', error);
+            const errorMessage = error?.message || 'An unexpected error occurred while deleting the chat';
+            this._panel.webview.postMessage({
+                command: 'error',
+                message: `Failed to delete chat: ${errorMessage}`
+            });
+
+            try {
+                await this.refreshChatHistory();
+            } catch (refreshError) {
+                console.error('Failed to refresh chat history after delete error:', refreshError);
+            }
+        }
     }
 
     private async renameChat(chatId: string, newName: string) {
-        if (!newName.trim()) {
+        if (!chatId || typeof chatId !== 'string' || chatId.trim() === '') {
+            this._panel.webview.postMessage({
+                command: 'error',
+                message: 'Invalid chat ID provided'
+            });
             return;
         }
 
-        const chats = this.getSavedChats();
-        const chat = chats[chatId];
-
-        if (!chat) {
+        const trimmedName = newName?.trim();
+        if (!trimmedName || trimmedName.length === 0) {
+            this._panel.webview.postMessage({
+                command: 'error',
+                message: 'Chat name cannot be empty'
+            });
             return;
         }
 
-        chat.name = newName.trim();
-        chat.updatedAt = Date.now();
-        chats[chatId] = chat;
+        if (trimmedName.length > 100) {
+            this._panel.webview.postMessage({
+                command: 'error',
+                message: 'Chat name is too long (maximum 100 characters allowed)'
+            });
+            return;
+        }
 
-        await this._context.globalState.update('ollama.savedChats', chats);
-        this.loadChatHistory();
+        const operationKey = `rename_${chatId}`;
+
+        try {
+            await this.withOperationLock(operationKey, async () => {
+                const chats = this.getSavedChats();
+                const chat = chats[chatId];
+
+                if (!chat) {
+                    this._panel.webview.postMessage({
+                        command: 'error',
+                        message: 'Chat not found or may have been deleted'
+                    });
+                    await this.refreshChatHistory();
+                    return;
+                }
+
+                if (chat.name === trimmedName) {
+                    return;
+                }
+
+                const updatedChat = {
+                    ...chat,
+                    name: trimmedName,
+                    updatedAt: Date.now()
+                };
+
+                const updatedChats = {
+                    ...chats,
+                    [chatId]: updatedChat
+                };
+
+                await this._context.globalState.update('ollama.savedChats', updatedChats);
+
+                await this.refreshChatHistory();
+
+                this._panel.webview.postMessage({
+                    command: 'chatRenamed',
+                    chatId: chatId,
+                    newName: trimmedName
+                });
+            });
+        } catch (error: any) {
+            if (error.message?.includes('already in progress')) {
+                this._panel.webview.postMessage({
+                    command: 'error',
+                    message: 'Rename operation is already in progress for this chat. Please wait and try again.'
+                });
+                return;
+            }
+
+            console.error('Error renaming chat:', error);
+            const errorMessage = error?.message || 'An unexpected error occurred while renaming the chat';
+            this._panel.webview.postMessage({
+                command: 'error',
+                message: `Failed to rename chat: ${errorMessage}`
+            });
+
+            try {
+                await this.refreshChatHistory();
+            } catch (refreshError) {
+                console.error('Failed to refresh chat history after rename error:', refreshError);
+            }
+        }
     }
 
     private loadChatHistory() {
@@ -234,6 +448,11 @@ export class ChatPanel {
             chats: chatList,
             currentChatId: this._currentChatId
         });
+    }
+
+    private async refreshChatHistory() {
+        await new Promise(resolve => setTimeout(resolve, 50));
+        this.loadChatHistory();
     }
 
     public static createOrShow(extensionUri: vscode.Uri, context: vscode.ExtensionContext) {
@@ -261,6 +480,12 @@ export class ChatPanel {
 
     public dispose() {
         ChatPanel.currentPanel = undefined;
+
+        // Clear any pending save timeout
+        if (this._saveTimeout) {
+            clearTimeout(this._saveTimeout);
+            this._saveTimeout = null;
+        }
 
         while (this._disposables.length) {
             const x = this._disposables.pop();
@@ -438,6 +663,12 @@ export class ChatPanel {
             flex-direction: column;
             background-color: var(--vscode-sideBar-background);
             overflow: hidden;
+            transition: width 0.3s ease;
+        }
+
+        .chat-sidebar.collapsed {
+            width: 0;
+            border-right: none;
         }
 
         .sidebar-header {
@@ -515,6 +746,88 @@ export class ChatPanel {
             border-bottom-right-radius: 4px;
         }
 
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+
+        .modal-content {
+            background-color: var(--vscode-quickInput-background);
+            border: 1px solid var(--vscode-quickInput-border);
+            border-radius: 6px;
+            padding: 20px;
+            min-width: 400px;
+            max-width: 500px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+        }
+
+        .modal-header {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: var(--vscode-quickInput-foreground);
+        }
+
+        .modal-input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid var(--vscode-input-border);
+            background-color: var(--vscode-input-background);
+            color: var(--vscode-input-foreground);
+            border-radius: 3px;
+            font-family: inherit;
+            font-size: 13px;
+            box-sizing: border-box;
+        }
+
+        .modal-input:focus {
+            outline: 1px solid var(--vscode-focusBorder);
+            outline-offset: -1px;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+            margin-top: 16px;
+        }
+
+        .modal-button {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            font-family: inherit;
+        }
+
+        .modal-button.primary {
+            background-color: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+        }
+
+        .modal-button.primary:hover {
+            background-color: var(--vscode-button-hoverBackground);
+        }
+
+        .modal-button.secondary {
+            background-color: transparent;
+            color: var(--vscode-foreground);
+        }
+
+        .modal-button.secondary:hover {
+            background-color: var(--vscode-button-secondaryHoverBackground);
+        }
+
         .header {
             padding: 10px 15px;
             border-bottom: 1px solid var(--vscode-panel-border);
@@ -522,6 +835,45 @@ export class ChatPanel {
             justify-content: space-between;
             align-items: center;
             gap: 10px;
+        }
+
+        .sidebar-toggle {
+            background: none;
+            border: none;
+            color: var(--vscode-foreground);
+            cursor: pointer;
+            padding: 6px;
+            border-radius: 3px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            opacity: 0.7;
+            transition: opacity 0.2s;
+            position: relative;
+            width: 20px;
+            height: 20px;
+        }
+
+        .sidebar-toggle::before {
+            content: '';
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            border: 1px solid currentColor;
+            border-right: none;
+            border-top: none;
+            transform: rotate(-45deg);
+            transition: transform 0.2s ease;
+        }
+
+        .sidebar-toggle.collapsed::before {
+            transform: rotate(135deg);
+        }
+
+        .sidebar-toggle:hover {
+            opacity: 1;
+            background-color: var(--vscode-toolbar-hoverBackground);
         }
 
         .header-left {
@@ -1009,7 +1361,7 @@ export class ChatPanel {
     </style>
 </head>
 <body>
-    <div class="chat-sidebar">
+    <div class="chat-sidebar" id="chatSidebar">
         <div class="sidebar-header">Chat History</div>
         <div class="chat-list" id="chatList"></div>
         <div class="context-menu" id="contextMenu">
@@ -1020,6 +1372,7 @@ export class ChatPanel {
     <div class="main-container">
         <div class="header">
             <div class="header-left">
+                <button id="sidebarToggle" class="sidebar-toggle" title="Toggle Sidebar"></button>
                 <h3>Ollama Chat</h3>
                 <button id="newChatButton" class="new-chat-button" title="New Chat">New Chat</button>
             </div>
@@ -1051,6 +1404,8 @@ export class ChatPanel {
         const status = document.getElementById('status');
         const modelSelect = document.getElementById('modelSelect');
         const newChatButton = document.getElementById('newChatButton');
+        const sidebarToggle = document.getElementById('sidebarToggle');
+        const chatSidebar = document.getElementById('chatSidebar');
         const chatList = document.getElementById('chatList');
         const contextMenu = document.getElementById('contextMenu');
         const renameMenuItem = document.getElementById('renameMenuItem');
@@ -1060,6 +1415,33 @@ export class ChatPanel {
         let currentChatId = null;
         let contextMenuChatId = null;
         let contextMenuChatName = null;
+        let isOperationInProgress = false;
+        let pendingOperations = new Set();
+        let sidebarCollapsed = false;
+
+        function toggleSidebar() {
+            sidebarCollapsed = !sidebarCollapsed;
+            if (chatSidebar) {
+                if (sidebarCollapsed) {
+                    chatSidebar.classList.add('collapsed');
+                } else {
+                    chatSidebar.classList.remove('collapsed');
+                }
+            }
+            if (sidebarToggle) {
+                if (sidebarCollapsed) {
+                    sidebarToggle.classList.add('collapsed');
+                    sidebarToggle.textContent = '▶';
+                } else {
+                    sidebarToggle.classList.remove('collapsed');
+                    sidebarToggle.textContent = '◀';
+                }
+            }
+            vscode.postMessage({
+                command: 'toggleSidebar',
+                collapsed: sidebarCollapsed
+            });
+        }
 
         function renderMarkdown(content) {
             if (!content) return '';
@@ -1407,6 +1789,14 @@ export class ChatPanel {
                 case 'error':
                     showError(message.message);
                     isLoading = false;
+                    if (contextMenuChatId && pendingOperations.has(contextMenuChatId)) {
+                        pendingOperations.delete(contextMenuChatId);
+                    }
+                    if (pendingOperations.size === 0) {
+                        isOperationInProgress = false;
+                        contextMenuChatId = null;
+                        contextMenuChatName = null;
+                    }
                     sendButton.disabled = false;
                     messageInput.disabled = false;
                     if (sendIcon) {
@@ -1454,14 +1844,24 @@ export class ChatPanel {
                     break;
                 case 'chatHistory':
                     renderChatHistory(message.chats || [], message.currentChatId);
+                    if (isOperationInProgress && message.chats) {
+                        const chatExists = message.chats.some(chat => chat.id === contextMenuChatId);
+                        if (!chatExists && pendingOperations.has(contextMenuChatId)) {
+                            pendingOperations.delete(contextMenuChatId);
+                            if (pendingOperations.size === 0) {
+                                isOperationInProgress = false;
+                                contextMenuChatId = null;
+                                contextMenuChatName = null;
+                            }
+                        }
+                    }
                     break;
                 case 'loadChatMessages':
                     chatContainer.innerHTML = '';
-                    userMessageIdCounter = 0;
+                    userMessageIdCounter = message.nextMessageId || 0;
                     if (message.messages && message.messages.length > 0) {
                         message.messages.forEach(msg => {
-                            const msgId = msg.id !== undefined ? msg.id : (msg.role === 'user' ? userMessageIdCounter++ : undefined);
-                            addMessage(msg.role, msg.content, msgId, msg.thinking);
+                            addMessage(msg.role, msg.content, msg.id, msg.thinking);
                         });
                     } else {
                         chatContainer.innerHTML = '<div class="empty-state">Start chatting with Ollama...</div>';
@@ -1473,6 +1873,41 @@ export class ChatPanel {
                                 opt.selected = true;
                             }
                         });
+                    }
+                    break;
+                case 'chatDeleted':
+                    if (pendingOperations.has(message.chatId)) {
+                        pendingOperations.delete(message.chatId);
+                    }
+                    if (pendingOperations.size === 0) {
+                        isOperationInProgress = false;
+                        contextMenuChatId = null;
+                        contextMenuChatName = null;
+                    }
+                    if (message.wasCurrentChat) {
+                        currentChatId = null;
+                    }
+                    break;
+                case 'chatRenamed':
+                    if (pendingOperations.has(message.chatId)) {
+                        pendingOperations.delete(message.chatId);
+                    }
+                    if (pendingOperations.size === 0) {
+                        isOperationInProgress = false;
+                        contextMenuChatId = null;
+                        contextMenuChatName = null;
+                    }
+                    break;
+                case 'setSidebarState':
+                    sidebarCollapsed = message.collapsed;
+                    if (sidebarCollapsed) {
+                        chatSidebar.classList.add('collapsed');
+                        sidebarToggle.classList.add('collapsed');
+                        sidebarToggle.textContent = '▶';
+                    } else {
+                        chatSidebar.classList.remove('collapsed');
+                        sidebarToggle.classList.remove('collapsed');
+                        sidebarToggle.textContent = '◀';
                     }
                     break;
             }
@@ -1542,7 +1977,9 @@ export class ChatPanel {
         }
 
         function showContextMenu(event, chatId, chatName) {
-            if (!contextMenu) return;
+            if (!contextMenu || isOperationInProgress || pendingOperations.has(chatId)) {
+                return;
+            }
             
             contextMenuChatId = chatId;
             contextMenuChatName = chatName;
@@ -1551,11 +1988,11 @@ export class ChatPanel {
             contextMenu.style.left = event.clientX + 'px';
             contextMenu.style.top = event.clientY + 'px';
             
-            const hideMenu = () => {
-                if (contextMenu) {
+            const hideMenu = (e) => {
+                if (contextMenu && !contextMenu.contains(e.target)) {
                     contextMenu.style.display = 'none';
+                    document.removeEventListener('click', hideMenu);
                 }
-                document.removeEventListener('click', hideMenu);
             };
             
             setTimeout(() => {
@@ -1565,42 +2002,56 @@ export class ChatPanel {
 
         if (renameMenuItem) {
             renameMenuItem.addEventListener('click', (e) => {
+                e.preventDefault();
                 e.stopPropagation();
-                if (contextMenuChatId && contextMenuChatName) {
-                    renameChat(contextMenuChatId, contextMenuChatName);
+                
+                const chatId = contextMenuChatId;
+                const chatName = contextMenuChatName;
+                
+                if (!chatId || !chatName || isOperationInProgress || pendingOperations.has(chatId)) {
+                    if (contextMenu) {
+                        contextMenu.style.display = 'none';
+                    }
+                    return;
                 }
+                
                 if (contextMenu) {
                     contextMenu.style.display = 'none';
                 }
+                
+                renameChat(chatId, chatName);
             });
         }
 
         if (deleteMenuItem) {
             deleteMenuItem.addEventListener('click', (e) => {
+                e.preventDefault();
                 e.stopPropagation();
-                if (contextMenuChatId) {
-                    if (confirm('Delete this chat?')) {
-                        vscode.postMessage({
-                            command: 'deleteChat',
-                            chatId: contextMenuChatId
-                        });
+                
+                const chatId = contextMenuChatId;
+                
+                if (!chatId || isOperationInProgress || pendingOperations.has(chatId)) {
+                    if (contextMenu) {
+                        contextMenu.style.display = 'none';
                     }
+                    return;
                 }
+                
                 if (contextMenu) {
                     contextMenu.style.display = 'none';
                 }
+                
+                deleteChat(chatId);
             });
         }
         
         function renameChat(chatId, currentName) {
-            const newName = prompt('Enter new chat name:', currentName);
-            if (newName && newName.trim() && newName.trim() !== currentName) {
-                vscode.postMessage({
-                    command: 'renameChat',
-                    chatId: chatId,
-                    newName: newName.trim()
-                });
-            }
+            showRenameDialog(chatId, currentName);
+        }
+        
+        function deleteChat(chatId) {
+            const chatName = contextMenuChatName;
+            showDeleteDialog(chatId, chatName);
         }
 
         if (newChatButton) {
@@ -1609,12 +2060,172 @@ export class ChatPanel {
             });
         }
 
+        if (sidebarToggle) {
+            sidebarToggle.addEventListener('click', () => {
+                toggleSidebar();
+            });
+        }
+
         vscode.postMessage({ command: 'checkConnection' });
+        vscode.postMessage({ command: 'getSidebarState' });
         vscode.postMessage({ command: 'getChatHistory' });
         loadModels();
         setInterval(() => {
             vscode.postMessage({ command: 'checkConnection' });
         }, 5000);
+
+        // Modal dialog functions
+        function showRenameDialog(chatId, currentName) {
+            if (isOperationInProgress || pendingOperations.has(chatId)) {
+                return;
+            }
+
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay';
+
+            const content = document.createElement('div');
+            content.className = 'modal-content';
+
+            const header = document.createElement('div');
+            header.className = 'modal-header';
+            header.textContent = 'Rename Chat';
+
+            const input = document.createElement('input');
+            input.className = 'modal-input';
+            input.type = 'text';
+            input.value = currentName;
+            input.maxLength = 100;
+
+            const actions = document.createElement('div');
+            actions.className = 'modal-actions';
+
+            const cancelButton = document.createElement('button');
+            cancelButton.className = 'modal-button secondary';
+            cancelButton.textContent = 'Cancel';
+            cancelButton.onclick = function() {
+                document.body.removeChild(overlay);
+            };
+
+            const saveButton = document.createElement('button');
+            saveButton.className = 'modal-button primary';
+            saveButton.textContent = 'Rename';
+            saveButton.onclick = function() {
+                const newName = input.value.trim();
+                if (!newName) {
+                    showError('Chat name cannot be empty');
+                    return;
+                }
+
+                if (newName === currentName) {
+                    document.body.removeChild(overlay);
+                    return;
+                }
+
+                if (newName.length > 100) {
+                    showError('Chat name is too long (max 100 characters)');
+                    return;
+                }
+
+                isOperationInProgress = true;
+                pendingOperations.add(chatId);
+
+                vscode.postMessage({
+                    command: 'renameChat',
+                    chatId: chatId,
+                    newName: newName
+                });
+
+                document.body.removeChild(overlay);
+            };
+
+            actions.appendChild(cancelButton);
+            actions.appendChild(saveButton);
+
+            content.appendChild(header);
+            content.appendChild(input);
+            content.appendChild(actions);
+            overlay.appendChild(content);
+
+            document.body.appendChild(overlay);
+            input.focus();
+            input.select();
+
+            input.onkeydown = function(e) {
+                if (e.key === 'Enter') {
+                    saveButton.click();
+                } else if (e.key === 'Escape') {
+                    cancelButton.click();
+                }
+            };
+        }
+
+        function showDeleteDialog(chatId, chatName) {
+            if (isOperationInProgress || pendingOperations.has(chatId)) {
+                return;
+            }
+
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay';
+
+            const content = document.createElement('div');
+            content.className = 'modal-content';
+
+            const header = document.createElement('div');
+            header.className = 'modal-header';
+            header.textContent = 'Delete Chat';
+
+            const message = document.createElement('div');
+            message.style.marginBottom = '16px';
+            message.style.color = 'var(--vscode-foreground)';
+            message.style.fontSize = '13px';
+            message.innerHTML = 'Are you sure you want to delete "' + chatName + '"? <br>This action cannot be undone.';
+
+            const actions = document.createElement('div');
+            actions.className = 'modal-actions';
+
+            const cancelButton = document.createElement('button');
+            cancelButton.className = 'modal-button secondary';
+            cancelButton.textContent = 'Cancel';
+            cancelButton.onclick = function() {
+                document.body.removeChild(overlay);
+            };
+
+            const deleteButton = document.createElement('button');
+            deleteButton.className = 'modal-button primary';
+            deleteButton.textContent = 'Delete';
+            deleteButton.style.backgroundColor = 'var(--vscode-errorForeground)';
+            deleteButton.style.color = 'var(--vscode-button-background)';
+            deleteButton.onclick = function() {
+                isOperationInProgress = true;
+                pendingOperations.add(chatId);
+
+                vscode.postMessage({
+                    command: 'deleteChat',
+                    chatId: chatId
+                });
+
+                document.body.removeChild(overlay);
+            };
+
+            actions.appendChild(cancelButton);
+            actions.appendChild(deleteButton);
+
+            content.appendChild(header);
+            content.appendChild(message);
+            content.appendChild(actions);
+            overlay.appendChild(content);
+
+            document.body.appendChild(overlay);
+            deleteButton.focus();
+
+            overlay.onkeydown = function(e) {
+                if (e.key === 'Enter') {
+                    deleteButton.click();
+                } else if (e.key === 'Escape') {
+                    cancelButton.click();
+                }
+            };
+        }
     </script>
 </body>
 </html>`;
