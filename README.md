@@ -1,51 +1,46 @@
-# Ollama VS Code Extension
+# Ollama Local Chat
 
-Een VS Code extensie om te chatten met Ollama lokaal, vergelijkbaar met GitHub Copilot maar dan met je eigen lokale Ollama instance.
+VS Code extension to chat with a local Ollama instance inside the editor—similar to Copilot-style chat but using your own models.
+
+## Requirements
+
+- [Ollama](https://ollama.ai/) installed and running locally
+- VS Code 1.74.0 or newer
+
+## Installation
+
+1. Install dependencies: `npm install`
+2. Build: `npm run compile`
+3. Press **F5** in VS Code to run the extension in a new window (Extension Development Host)
+
+To install from source in your main VS Code:
+
+1. Run `npm run compile`
+2. In VS Code: **Run** → **Install Additional Development Extensions...** → choose **Install from VSIX...** and pick the built VSIX, or run the extension from this folder via **Run and Debug** (F5).
+
+## Usage
+
+1. Start Ollama (e.g. `ollama serve` or ensure the Ollama app is running).
+2. Open the Command Palette: **Cmd+Shift+P** (macOS) or **Ctrl+Shift+P** (Windows/Linux).
+3. Run **Open Ollama Chat**.
+4. Use the chat panel to send messages; responses stream in real time.
+
+## Configuration
+
+In VS Code **Settings** (or `settings.json`):
+
+| Setting           | Description                    | Default                |
+|-------------------|--------------------------------|------------------------|
+| `ollama.baseUrl`  | Ollama API base URL            | `http://localhost:11434` |
+| `ollama.model`    | Default model for the chat     | `llama3.2:latest`      |
 
 ## Features
 
-- 💬 Chat interface in VS Code
-- 🔌 Automatische verbinding met lokale Ollama instance
-- ⚡ Streaming responses voor real-time antwoorden
-- 🎨 Moderne UI die past bij VS Code thema's
-- ⚙️ Configureerbare model selectie
-
-## Vereisten
-
-- [Ollama](https://ollama.ai/) moet lokaal geïnstalleerd en draaiend zijn
-- VS Code versie 1.74.0 of hoger
-
-## Installatie
-
-1. Clone deze repository
-2. Open de folder in VS Code
-3. Installeer dependencies: `npm install`
-4. Compileer de extensie: `npm run compile`
-5. Druk op F5 om de extensie te testen in een nieuwe VS Code window
-
-## Gebruik
-
-1. Zorg dat Ollama lokaal draait (`ollama serve`)
-2. Open de command palette (Cmd+Shift+P / Ctrl+Shift+P)
-3. Typ "Open Ollama Chat" en selecteer de command
-4. Start met chatten!
-
-## Configuratie
-
-Je kunt de volgende instellingen aanpassen in VS Code settings:
-
-- `ollama.baseUrl`: De URL van je Ollama API (standaard: `http://localhost:11434`)
-- `ollama.model`: Het standaard model om te gebruiken (standaard: `llama2`)
-
-## Development
-
-```bash
-npm install
-npm run compile
-npm run watch
-```
-
-Druk op F5 in VS Code om de extensie te testen.
+- Chat panel inside VS Code
+- Connects to your local Ollama API
+- Streaming responses
+- Theme-aware UI
+- Configurable model and base URL
 
 ## License
 
