@@ -9,13 +9,13 @@ VS Code extension to chat with a local Ollama instance inside the editor—simil
 
 ## Installation
 
-1. Install dependencies: `npm install`
-2. Build: `npm run compile`
+1. Install dependencies: `bun install`
+2. Build: `bun run compile`
 3. Press **F5** in VS Code to run the extension in a new window (Extension Development Host)
 
 To install from source in your main VS Code:
 
-1. Run `npm run compile`
+1. Run `bun run compile`
 2. In VS Code: **Run** → **Install Additional Development Extensions...** → choose **Install from VSIX...** and pick the built VSIX, or run the extension from this folder via **Run and Debug** (F5).
 
 ## Usage
@@ -29,10 +29,10 @@ To install from source in your main VS Code:
 
 In VS Code **Settings** (or `settings.json`):
 
-| Setting           | Description                    | Default                |
-|-------------------|--------------------------------|------------------------|
-| `ollama.baseUrl`  | Ollama API base URL            | `http://localhost:11434` |
-| `ollama.model`    | Default model for the chat     | `llama3.2:latest`      |
+| Setting          | Description                | Default                  |
+| ---------------- | -------------------------- | ------------------------ |
+| `ollama.baseUrl` | Ollama API base URL        | `http://localhost:11434` |
+| `ollama.model`   | Default model for the chat | `llama3.2:latest`        |
 
 ## Features
 
@@ -41,6 +41,13 @@ In VS Code **Settings** (or `settings.json`):
 - Streaming responses
 - Theme-aware UI
 - Configurable model and base URL
+
+## Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for how to set up the project, propose changes, and submit pull requests. By participating, you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).
+
+- Found a bug? [Open an issue](../../issues/new?template=bug_report.md).
+- Have an idea? [Request a feature](../../issues/new?template=feature_request.md).
 
 ## License
 

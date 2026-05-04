@@ -1,0 +1,46 @@
+name: Release
+
+on:
+    push:
+        tags:
+            - "v*"
+
+permissions:
+    contents: write
+
+jobs:
+    release:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Setup Bun
+              uses: oven-sh/setup-bun@v2
+              with:
+                  bun-version: 1.2.3
+
+            - name: Install dependencies
+              run: bun install --frozen-lockfile
+
+            - name: Resolve version from tag
+              id: version
+              run: |
+                  VERSION="${GITHUB_REF_NAME#v}"
+                  echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+                  node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version='$VERSION';fs.writeFileSync('package.json',JSON.stringify(p,null,4)+'\n');"
+                  echo "Packaging version $VERSION"
+
+            - name: Compile
+              run: bun run compile
+
+            - name: Package VSIX
+              run: bunx @vscode/vsce package --no-dependencies -o "ollama-chat-vscode-${{ steps.version.outputs.version }}.vsix"
+
+            - name: Create GitHub Release
+              uses: softprops/action-gh-release@v2
+              with:
+                  files: ollama-chat-vscode-*.vsix
+                  generate_release_notes: true
+                  draft: false
+                  prerelease: false

@@ -1,5 +1,5 @@
-import * as vscode from 'vscode';
-import { OllamaClient, OllamaMessage } from './ollamaClient';
+import * as vscode from "vscode";
+import { OllamaClient, OllamaMessage } from "./ollamaClient";
 
 interface SavedChat {
     id: string;
@@ -8,6 +8,7 @@ interface SavedChat {
     model: string;
     createdAt: number;
     updatedAt: number;
+    aiTitleGenerated?: boolean;
 }
 
 export class ChatPanel {
@@ -26,86 +27,109 @@ export class ChatPanel {
     private _saveTimeout: NodeJS.Timeout | null = null;
     private readonly _saveDebounceMs: number = 500;
 
-    private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, context: vscode.ExtensionContext) {
+    private constructor(
+        panel: vscode.WebviewPanel,
+        extensionUri: vscode.Uri,
+        context: vscode.ExtensionContext,
+    ) {
         this._panel = panel;
         this._extensionUri = extensionUri;
         this._context = context;
         this._ollamaClient = new OllamaClient();
-        const savedModel = context.workspaceState.get<string>('ollama.selectedModel');
-        const config = vscode.workspace.getConfiguration('ollama');
-        this._selectedModel = savedModel || config.get<string>('model', 'llama3.2:latest');
+        const savedModel = context.workspaceState.get<string>(
+            "ollama.selectedModel",
+        );
+        const config = vscode.workspace.getConfiguration("ollama");
+        this._selectedModel =
+            savedModel || config.get<string>("model", "llama3.2:latest");
 
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
         this._panel.webview.onDidReceiveMessage(
             async (message: any) => {
                 switch (message.command) {
-                    case 'sendMessage':
+                    case "sendMessage":
                         await this.handleSendMessage(message.text);
                         return;
-                    case 'editAndResend':
-                        await this.handleEditAndResend(message.messageId, message.newText);
+                    case "editAndResend":
+                        await this.handleEditAndResend(
+                            message.messageId,
+                            message.newText,
+                        );
                         return;
-                    case 'clearChat':
+                    case "clearChat":
                         this._messages = [];
                         this._messageIdCounter = 0;
                         this._currentChatId = null;
-                        this._panel.webview.postMessage({ command: 'clearChat' });
+                        this._panel.webview.postMessage({
+                            command: "clearChat",
+                        });
                         this.loadChatHistory();
                         return;
-                    case 'checkConnection':
-                        const isConnected = await this._ollamaClient.checkConnection();
+                    case "checkConnection":
+                        const isConnected =
+                            await this._ollamaClient.checkConnection();
                         this._panel.webview.postMessage({
-                            command: 'connectionStatus',
-                            connected: isConnected
+                            command: "connectionStatus",
+                            connected: isConnected,
                         });
                         return;
-                    case 'getModels':
+                    case "getModels":
                         const models = await this._ollamaClient.listModels();
                         this._panel.webview.postMessage({
-                            command: 'modelsList',
+                            command: "modelsList",
                             models: models,
-                            selectedModel: this._selectedModel
+                            selectedModel: this._selectedModel,
                         });
                         return;
-                    case 'selectModel':
+                    case "selectModel":
                         this._selectedModel = message.model;
-                        this._context.workspaceState.update('ollama.selectedModel', message.model);
+                        this._context.workspaceState.update(
+                            "ollama.selectedModel",
+                            message.model,
+                        );
                         if (this._currentChatId && this._messages.length > 0) {
                             await this.saveCurrentChat();
                         }
                         return;
-                    case 'stopMessage':
+                    case "stopMessage":
                         if (this._currentRequest) {
                             this._currentRequest.abort();
                             this._currentRequest = null;
                         }
                         return;
-                    case 'loadChat':
+                    case "loadChat":
                         await this.loadChat(message.chatId);
                         return;
-                    case 'deleteChat':
+                    case "deleteChat":
                         await this.deleteChat(message.chatId);
                         return;
-                    case 'renameChat':
+                    case "renameChat":
                         await this.renameChat(message.chatId, message.newName);
                         return;
-                    case 'getChatHistory':
+                    case "getChatHistory":
                         this.loadChatHistory();
                         return;
-                    case 'toggleSidebar':
-                        this._context.workspaceState.update('ollama.sidebarCollapsed', message.collapsed);
+                    case "toggleSidebar":
+                        this._context.workspaceState.update(
+                            "ollama.sidebarCollapsed",
+                            message.collapsed,
+                        );
                         return;
-                    case 'getSidebarState':
-                        const sidebarCollapsed = this._context.workspaceState.get<boolean>('ollama.sidebarCollapsed', false);
+                    case "getSidebarState":
+                        const sidebarCollapsed =
+                            this._context.workspaceState.get<boolean>(
+                                "ollama.sidebarCollapsed",
+                                false,
+                            );
                         this._panel.webview.postMessage({
-                            command: 'setSidebarState',
-                            collapsed: sidebarCollapsed
+                            command: "setSidebarState",
+                            collapsed: sidebarCollapsed,
                         });
                         return;
                 }
             },
             null,
-            this._disposables
+            this._disposables,
         );
 
         this._panel.webview.html = this._getHtmlForWebview(this._panel.webview);
@@ -118,7 +142,7 @@ export class ChatPanel {
         if (trimmed.length <= maxLength) {
             return trimmed;
         }
-        return trimmed.substring(0, maxLength - 3) + '...';
+        return trimmed.substring(0, maxLength - 3) + "...";
     }
 
     private generateUniqueChatId(): string {
@@ -140,7 +164,10 @@ export class ChatPanel {
         this._operationLocks.delete(operation);
     }
 
-    private async withOperationLock<T>(operation: string, fn: () => Promise<T>): Promise<T> {
+    private async withOperationLock<T>(
+        operation: string,
+        fn: () => Promise<T>,
+    ): Promise<T> {
         if (this.isOperationLocked(operation)) {
             throw new Error(`Operation '${operation}' is already in progress`);
         }
@@ -184,18 +211,22 @@ export class ChatPanel {
                 isNewChat = true;
             }
 
-            const firstUserMessage = this._messages.find(m => m.role === 'user');
-            const chatName = firstUserMessage
+            const firstUserMessage = this._messages.find(
+                (m) => m.role === "user",
+            );
+            const fallbackName = firstUserMessage
                 ? this.generateChatName(firstUserMessage.content)
                 : `Chat ${new Date(now).toLocaleString()}`;
 
             const existingChat = chats[this._currentChatId];
+            const preservedName = existingChat?.name || fallbackName;
 
-            const hasChanges = !existingChat ||
+            const hasChanges =
+                !existingChat ||
                 existingChat.messages.length !== this._messages.length ||
                 existingChat.model !== this._selectedModel ||
-                existingChat.name !== chatName ||
-                JSON.stringify(existingChat.messages) !== JSON.stringify(this._messages);
+                JSON.stringify(existingChat.messages) !==
+                    JSON.stringify(this._messages);
 
             if (!isNewChat && !hasChanges) {
                 return;
@@ -203,26 +234,105 @@ export class ChatPanel {
 
             const savedChat: SavedChat = {
                 id: this._currentChatId,
-                name: chatName,
+                name: preservedName,
                 messages: [...this._messages],
                 model: this._selectedModel,
                 createdAt: existingChat?.createdAt || now,
-                updatedAt: now
+                updatedAt: now,
+                aiTitleGenerated: existingChat?.aiTitleGenerated,
             };
 
             chats[this._currentChatId] = savedChat;
-            await this._context.globalState.update('ollama.savedChats', chats);
+            await this._context.globalState.update("ollama.savedChats", chats);
 
             if (isNewChat) {
                 this.loadChatHistory();
+                if (firstUserMessage) {
+                    void this.generateAITitle(
+                        this._currentChatId,
+                        firstUserMessage.content,
+                    );
+                }
             }
         } catch (error) {
-            console.error('Failed to save chat:', error);
+            console.error("Failed to save chat:", error);
         }
     }
 
+    private async generateAITitle(
+        chatId: string,
+        userMessage: string,
+    ): Promise<void> {
+        try {
+            const truncated =
+                userMessage.length > 500
+                    ? userMessage.substring(0, 500)
+                    : userMessage;
+
+            const titleMessages: OllamaMessage[] = [
+                {
+                    role: "system",
+                    content:
+                        "You generate concise chat titles. Reply with ONLY the title text — 3 to 6 words, written in the SAME LANGUAGE as the user's message (e.g. Dutch input -> Dutch title, English input -> English title). Plain text only, no quotes, no markdown, no trailing punctuation, no prefix like 'Title:'.",
+                },
+                {
+                    role: "user",
+                    content: `Generate a short title in the same language as this message:\n\n${truncated}`,
+                },
+            ];
+
+            const request = this._ollamaClient.chat(
+                titleMessages,
+                this._selectedModel,
+            );
+            const result = await request.promise;
+            const title = this.sanitizeTitle(result.content);
+            if (!title) {
+                return;
+            }
+
+            const chats = this.getSavedChats();
+            const chat = chats[chatId];
+            if (!chat || chat.aiTitleGenerated) {
+                return;
+            }
+
+            chats[chatId] = {
+                ...chat,
+                name: title,
+                aiTitleGenerated: true,
+                updatedAt: Date.now(),
+            };
+            await this._context.globalState.update("ollama.savedChats", chats);
+            this.loadChatHistory();
+        } catch (error) {
+            console.error("Failed to generate AI title:", error);
+        }
+    }
+
+    private sanitizeTitle(raw: string): string | null {
+        let title = (raw || "").trim();
+        title = title.split("\n")[0].trim();
+        title = title.replace(
+            /^(title|chat title|conversation title)\s*[:\-]\s*/i,
+            "",
+        );
+        title = title.replace(/^["'`*_]+|["'`*_]+$/g, "");
+        title = title.replace(/[.!?,:;]+$/, "").trim();
+        if (title.length === 0) {
+            return null;
+        }
+        if (title.length > 60) {
+            title = title.substring(0, 60).trim() + "…";
+        }
+        return title;
+    }
+
     private getSavedChats(): { [key: string]: SavedChat } {
-        return this._context.globalState.get<{ [key: string]: SavedChat }>('ollama.savedChats', {});
+        return this._context.globalState.get<{ [key: string]: SavedChat }>(
+            "ollama.savedChats",
+            {},
+        );
     }
 
     private async loadChat(chatId: string) {
@@ -231,8 +341,8 @@ export class ChatPanel {
 
         if (!chat) {
             this._panel.webview.postMessage({
-                command: 'error',
-                message: 'Chat not found'
+                command: "error",
+                message: "Chat not found",
             });
             return;
         }
@@ -241,42 +351,42 @@ export class ChatPanel {
         this._messages = [...chat.messages];
         this._selectedModel = chat.model;
 
-        this._messageIdCounter = this._messages
-            .filter(msg => msg.role === 'user')
-            .length;
+        this._messageIdCounter = this._messages.filter(
+            (msg) => msg.role === "user",
+        ).length;
 
-        this._context.workspaceState.update('ollama.selectedModel', chat.model);
+        this._context.workspaceState.update("ollama.selectedModel", chat.model);
 
         const messagesWithIds = this._messages.map((msg, index) => {
-            const messageId = msg.role === 'user' ? index : undefined;
+            const messageId = msg.role === "user" ? index : undefined;
             return {
                 role: msg.role,
                 content: msg.content,
                 thinking: msg.thinking,
-                id: messageId
+                id: messageId,
             };
         });
 
         this._panel.webview.postMessage({
-            command: 'loadChatMessages',
+            command: "loadChatMessages",
             messages: messagesWithIds,
             model: chat.model,
-            nextMessageId: this._messageIdCounter
+            nextMessageId: this._messageIdCounter,
         });
 
         const models = await this._ollamaClient.listModels();
         this._panel.webview.postMessage({
-            command: 'modelsList',
+            command: "modelsList",
             models: models,
-            selectedModel: this._selectedModel
+            selectedModel: this._selectedModel,
         });
     }
 
     private async deleteChat(chatId: string) {
-        if (!chatId || typeof chatId !== 'string' || chatId.trim() === '') {
+        if (!chatId || typeof chatId !== "string" || chatId.trim() === "") {
             this._panel.webview.postMessage({
-                command: 'error',
-                message: 'Invalid chat ID provided'
+                command: "error",
+                message: "Invalid chat ID provided",
             });
             return;
         }
@@ -289,8 +399,8 @@ export class ChatPanel {
 
                 if (!chats[chatId]) {
                     this._panel.webview.postMessage({
-                        command: 'error',
-                        message: 'Chat not found or already deleted'
+                        command: "error",
+                        message: "Chat not found or already deleted",
                     });
                     await this.refreshChatHistory();
                     return;
@@ -301,52 +411,61 @@ export class ChatPanel {
                 const updatedChats = { ...chats };
                 delete updatedChats[chatId];
 
-                await this._context.globalState.update('ollama.savedChats', updatedChats);
+                await this._context.globalState.update(
+                    "ollama.savedChats",
+                    updatedChats,
+                );
 
                 if (wasCurrentChat) {
                     this._currentChatId = null;
                     this._messages = [];
                     this._messageIdCounter = 0;
-                    this._panel.webview.postMessage({ command: 'clearChat' });
+                    this._panel.webview.postMessage({ command: "clearChat" });
                 }
 
                 await this.refreshChatHistory();
 
                 this._panel.webview.postMessage({
-                    command: 'chatDeleted',
+                    command: "chatDeleted",
                     chatId: chatId,
-                    wasCurrentChat: wasCurrentChat
+                    wasCurrentChat: wasCurrentChat,
                 });
             });
         } catch (error: any) {
-            if (error.message?.includes('already in progress')) {
+            if (error.message?.includes("already in progress")) {
                 this._panel.webview.postMessage({
-                    command: 'error',
-                    message: 'Delete operation is already in progress for this chat. Please wait and try again.'
+                    command: "error",
+                    message:
+                        "Delete operation is already in progress for this chat. Please wait and try again.",
                 });
                 return;
             }
 
-            console.error('Error deleting chat:', error);
-            const errorMessage = error?.message || 'An unexpected error occurred while deleting the chat';
+            console.error("Error deleting chat:", error);
+            const errorMessage =
+                error?.message ||
+                "An unexpected error occurred while deleting the chat";
             this._panel.webview.postMessage({
-                command: 'error',
-                message: `Failed to delete chat: ${errorMessage}`
+                command: "error",
+                message: `Failed to delete chat: ${errorMessage}`,
             });
 
             try {
                 await this.refreshChatHistory();
             } catch (refreshError) {
-                console.error('Failed to refresh chat history after delete error:', refreshError);
+                console.error(
+                    "Failed to refresh chat history after delete error:",
+                    refreshError,
+                );
             }
         }
     }
 
     private async renameChat(chatId: string, newName: string) {
-        if (!chatId || typeof chatId !== 'string' || chatId.trim() === '') {
+        if (!chatId || typeof chatId !== "string" || chatId.trim() === "") {
             this._panel.webview.postMessage({
-                command: 'error',
-                message: 'Invalid chat ID provided'
+                command: "error",
+                message: "Invalid chat ID provided",
             });
             return;
         }
@@ -354,16 +473,17 @@ export class ChatPanel {
         const trimmedName = newName?.trim();
         if (!trimmedName || trimmedName.length === 0) {
             this._panel.webview.postMessage({
-                command: 'error',
-                message: 'Chat name cannot be empty'
+                command: "error",
+                message: "Chat name cannot be empty",
             });
             return;
         }
 
         if (trimmedName.length > 100) {
             this._panel.webview.postMessage({
-                command: 'error',
-                message: 'Chat name is too long (maximum 100 characters allowed)'
+                command: "error",
+                message:
+                    "Chat name is too long (maximum 100 characters allowed)",
             });
             return;
         }
@@ -377,8 +497,8 @@ export class ChatPanel {
 
                 if (!chat) {
                     this._panel.webview.postMessage({
-                        command: 'error',
-                        message: 'Chat not found or may have been deleted'
+                        command: "error",
+                        message: "Chat not found or may have been deleted",
                     });
                     await this.refreshChatHistory();
                     return;
@@ -391,44 +511,54 @@ export class ChatPanel {
                 const updatedChat = {
                     ...chat,
                     name: trimmedName,
-                    updatedAt: Date.now()
+                    aiTitleGenerated: true,
+                    updatedAt: Date.now(),
                 };
 
                 const updatedChats = {
                     ...chats,
-                    [chatId]: updatedChat
+                    [chatId]: updatedChat,
                 };
 
-                await this._context.globalState.update('ollama.savedChats', updatedChats);
+                await this._context.globalState.update(
+                    "ollama.savedChats",
+                    updatedChats,
+                );
 
                 await this.refreshChatHistory();
 
                 this._panel.webview.postMessage({
-                    command: 'chatRenamed',
+                    command: "chatRenamed",
                     chatId: chatId,
-                    newName: trimmedName
+                    newName: trimmedName,
                 });
             });
         } catch (error: any) {
-            if (error.message?.includes('already in progress')) {
+            if (error.message?.includes("already in progress")) {
                 this._panel.webview.postMessage({
-                    command: 'error',
-                    message: 'Rename operation is already in progress for this chat. Please wait and try again.'
+                    command: "error",
+                    message:
+                        "Rename operation is already in progress for this chat. Please wait and try again.",
                 });
                 return;
             }
 
-            console.error('Error renaming chat:', error);
-            const errorMessage = error?.message || 'An unexpected error occurred while renaming the chat';
+            console.error("Error renaming chat:", error);
+            const errorMessage =
+                error?.message ||
+                "An unexpected error occurred while renaming the chat";
             this._panel.webview.postMessage({
-                command: 'error',
-                message: `Failed to rename chat: ${errorMessage}`
+                command: "error",
+                message: `Failed to rename chat: ${errorMessage}`,
             });
 
             try {
                 await this.refreshChatHistory();
             } catch (refreshError) {
-                console.error('Failed to refresh chat history after rename error:', refreshError);
+                console.error(
+                    "Failed to refresh chat history after rename error:",
+                    refreshError,
+                );
             }
         }
     }
@@ -437,25 +567,28 @@ export class ChatPanel {
         const chats = this.getSavedChats();
         const chatList = Object.values(chats)
             .sort((a, b) => b.updatedAt - a.updatedAt)
-            .map(chat => ({
+            .map((chat) => ({
                 id: chat.id,
                 name: chat.name,
-                updatedAt: chat.updatedAt
+                updatedAt: chat.updatedAt,
             }));
 
         this._panel.webview.postMessage({
-            command: 'chatHistory',
+            command: "chatHistory",
             chats: chatList,
-            currentChatId: this._currentChatId
+            currentChatId: this._currentChatId,
         });
     }
 
     private async refreshChatHistory() {
-        await new Promise(resolve => setTimeout(resolve, 50));
+        await new Promise((resolve) => setTimeout(resolve, 50));
         this.loadChatHistory();
     }
 
-    public static createOrShow(extensionUri: vscode.Uri, context: vscode.ExtensionContext) {
+    public static createOrShow(
+        extensionUri: vscode.Uri,
+        context: vscode.ExtensionContext,
+    ) {
         const column = vscode.window.activeTextEditor
             ? vscode.window.activeTextEditor.viewColumn
             : undefined;
@@ -466,13 +599,13 @@ export class ChatPanel {
         }
 
         const panel = vscode.window.createWebviewPanel(
-            'ollamaChat',
-            'Ollama Chat',
+            "ollamaChat",
+            "Ollama Chat",
             column || vscode.ViewColumn.One,
             {
                 enableScripts: true,
                 localResourceRoots: [extensionUri],
-            }
+            },
         );
 
         ChatPanel.currentPanel = new ChatPanel(panel, extensionUri, context);
@@ -501,14 +634,14 @@ export class ChatPanel {
 
         const messageId = this._messageIdCounter++;
         const userMessage: OllamaMessage = {
-            role: 'user',
+            role: "user",
             content: text,
         };
 
         this._messages.push(userMessage);
         this._panel.webview.postMessage({
-            command: 'addMessage',
-            message: { id: messageId, role: 'user', content: text },
+            command: "addMessage",
+            message: { id: messageId, role: "user", content: text },
         });
 
         await this.sendAssistantResponse();
@@ -529,7 +662,7 @@ export class ChatPanel {
         let currentUserMessageId = 0;
 
         for (let i = 0; i < this._messages.length; i++) {
-            if (this._messages[i].role === 'user') {
+            if (this._messages[i].role === "user") {
                 if (currentUserMessageId === messageId) {
                     userMessageIndex = i;
                     break;
@@ -546,13 +679,13 @@ export class ChatPanel {
         this._messages = this._messages.slice(0, userMessageIndex + 1);
 
         this._panel.webview.postMessage({
-            command: 'editMessage',
+            command: "editMessage",
             messageId: messageId,
             newContent: newText,
         });
 
         this._panel.webview.postMessage({
-            command: 'removeMessagesAfter',
+            command: "removeMessagesAfter",
             messageId: messageId,
         });
 
@@ -562,31 +695,36 @@ export class ChatPanel {
 
     private async sendAssistantResponse() {
         const assistantMessage: OllamaMessage = {
-            role: 'assistant',
-            content: '',
+            role: "assistant",
+            content: "",
         };
 
         this._panel.webview.postMessage({
-            command: 'addMessage',
-            message: { role: 'assistant', content: '' },
+            command: "addMessage",
+            message: { role: "assistant", content: "" },
         });
 
         try {
-            let fullResponse = '';
-            let fullThinking = '';
-            const request = this._ollamaClient.chat(this._messages, this._selectedModel, (chunk) => {
-                fullResponse += chunk;
-                this._panel.webview.postMessage({
-                    command: 'updateMessage',
-                    content: fullResponse,
-                });
-            }, (thinking) => {
-                fullThinking = thinking;
-                this._panel.webview.postMessage({
-                    command: 'updateThinking',
-                    thinking: fullThinking,
-                });
-            });
+            let fullResponse = "";
+            let fullThinking = "";
+            const request = this._ollamaClient.chat(
+                this._messages,
+                this._selectedModel,
+                (chunk) => {
+                    fullResponse += chunk;
+                    this._panel.webview.postMessage({
+                        command: "updateMessage",
+                        content: fullResponse,
+                    });
+                },
+                (thinking) => {
+                    fullThinking = thinking;
+                    this._panel.webview.postMessage({
+                        command: "updateThinking",
+                        thinking: fullThinking,
+                    });
+                },
+            );
 
             this._currentRequest = request;
 
@@ -598,7 +736,7 @@ export class ChatPanel {
                 assistantMessage.thinking = result.thinking;
             }
             const lastIndex = this._messages.length - 1;
-            if (this._messages[lastIndex]?.role === 'assistant') {
+            if (this._messages[lastIndex]?.role === "assistant") {
                 this._messages[lastIndex] = assistantMessage;
             } else {
                 this._messages.push(assistantMessage);
@@ -606,20 +744,22 @@ export class ChatPanel {
             await this.saveCurrentChat();
         } catch (error: any) {
             this._currentRequest = null;
-            const errorMessage = error.message || 'An error occurred';
-            if (errorMessage.includes('destroyed') || errorMessage.includes('aborted')) {
+            const errorMessage = error.message || "An error occurred";
+            if (
+                errorMessage.includes("destroyed") ||
+                errorMessage.includes("aborted")
+            ) {
                 this._panel.webview.postMessage({
-                    command: 'messageStopped'
+                    command: "messageStopped",
                 });
             } else {
                 this._panel.webview.postMessage({
-                    command: 'error',
+                    command: "error",
                     message: errorMessage,
                 });
             }
         }
     }
-
 
     private _getHtmlForWebview(webview: vscode.Webview) {
         return `<!DOCTYPE html>
@@ -631,6 +771,20 @@ export class ChatPanel {
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
     <style>
+        :root {
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 14px;
+            --radius-xl: 20px;
+            --space-1: 4px;
+            --space-2: 8px;
+            --space-3: 12px;
+            --space-4: 16px;
+            --space-5: 20px;
+            --space-6: 24px;
+            --transition: 180ms cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -648,50 +802,92 @@ export class ChatPanel {
             overflow: hidden;
         }
 
-        .main-container {
-            display: flex;
-            flex-direction: column;
-            flex: 1;
-            overflow: hidden;
-        }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground); }
 
+        /* Sidebar */
         .chat-sidebar {
-            width: 250px;
+            width: 280px;
+            flex-shrink: 0;
             border-right: 1px solid var(--vscode-panel-border);
             display: flex;
             flex-direction: column;
             background-color: var(--vscode-sideBar-background);
             overflow: hidden;
-            transition: width 0.3s ease;
+            transition: width var(--transition), border-right-color var(--transition);
         }
 
         .chat-sidebar.collapsed {
             width: 0;
-            border-right: none;
+            border-right-color: transparent;
         }
 
         .sidebar-header {
-            padding: 10px 15px;
-            border-bottom: 1px solid var(--vscode-panel-border);
+            padding: var(--space-4) var(--space-4) var(--space-3);
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-3);
+        }
+
+        .sidebar-title {
+            font-size: 11px;
             font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--vscode-descriptionForeground);
+            opacity: 0.85;
+        }
+
+        .sidebar-new-chat {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: var(--space-2);
+            padding: var(--space-2) var(--space-3);
+            border: 1px solid var(--vscode-panel-border);
+            background-color: transparent;
+            color: var(--vscode-foreground);
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            font-family: inherit;
+            transition: background-color var(--transition), border-color var(--transition);
+            height: 36px;
+        }
+
+        .sidebar-new-chat:hover {
+            background-color: var(--vscode-list-hoverBackground);
+            border-color: var(--vscode-focusBorder);
         }
 
         .chat-list {
             flex: 1;
             overflow-y: auto;
-            padding: 5px;
+            padding: var(--space-2);
+        }
+
+        .chat-list-empty {
+            padding: var(--space-5) var(--space-3);
+            text-align: center;
+            color: var(--vscode-descriptionForeground);
+            font-size: 12px;
+            opacity: 0.7;
         }
 
         .chat-item {
-            padding: 8px 10px;
+            padding: var(--space-2) var(--space-3);
             margin: 2px 0;
-            border-radius: 4px;
+            border-radius: var(--radius-md);
             cursor: pointer;
             display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 5px;
+            flex-direction: column;
+            gap: 2px;
             position: relative;
+            transition: background-color var(--transition);
+            border: 1px solid transparent;
         }
 
         .chat-item:hover {
@@ -704,358 +900,260 @@ export class ChatPanel {
         }
 
         .chat-item-name {
-            flex: 1;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
             font-size: 13px;
-        }
-
-        .context-menu {
-            position: fixed;
-            background-color: var(--vscode-menu-background);
-            border: 1px solid var(--vscode-menu-border);
-            border-radius: 4px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-            z-index: 1000;
-            min-width: 120px;
-            display: none;
-        }
-
-        .context-menu-item {
-            padding: 8px 12px;
-            cursor: pointer;
-            font-size: 13px;
-            color: var(--vscode-menu-foreground);
-            user-select: none;
-        }
-
-        .context-menu-item:hover {
-            background-color: var(--vscode-menu-selectionBackground);
-            color: var(--vscode-menu-selectionForeground);
-        }
-
-        .context-menu-item:first-child {
-            border-top-left-radius: 4px;
-            border-top-right-radius: 4px;
-        }
-
-        .context-menu-item:last-child {
-            border-bottom-left-radius: 4px;
-            border-bottom-right-radius: 4px;
-        }
-
-        .modal-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: rgba(0, 0, 0, 0.5);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 2000;
-        }
-
-        .modal-content {
-            background-color: var(--vscode-quickInput-background);
-            border: 1px solid var(--vscode-quickInput-border);
-            border-radius: 6px;
-            padding: 20px;
-            min-width: 400px;
-            max-width: 500px;
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-        }
-
-        .modal-header {
-            font-size: 16px;
-            font-weight: 600;
-            margin-bottom: 16px;
-            color: var(--vscode-quickInput-foreground);
-        }
-
-        .modal-input {
-            width: 100%;
-            padding: 8px 12px;
-            border: 1px solid var(--vscode-input-border);
-            background-color: var(--vscode-input-background);
-            color: var(--vscode-input-foreground);
-            border-radius: 3px;
-            font-family: inherit;
-            font-size: 13px;
-            box-sizing: border-box;
-        }
-
-        .modal-input:focus {
-            outline: 1px solid var(--vscode-focusBorder);
-            outline-offset: -1px;
-        }
-
-        .modal-actions {
-            display: flex;
-            gap: 8px;
-            justify-content: flex-end;
-            margin-top: 16px;
-        }
-
-        .modal-button {
-            padding: 6px 12px;
-            border: none;
-            border-radius: 3px;
-            cursor: pointer;
-            font-size: 12px;
             font-weight: 500;
-            font-family: inherit;
         }
 
-        .modal-button.primary {
-            background-color: var(--vscode-button-background);
-            color: var(--vscode-button-foreground);
+        .chat-item-time {
+            font-size: 11px;
+            opacity: 0.65;
         }
 
-        .modal-button.primary:hover {
-            background-color: var(--vscode-button-hoverBackground);
-        }
-
-        .modal-button.secondary {
-            background-color: transparent;
-            color: var(--vscode-foreground);
-        }
-
-        .modal-button.secondary:hover {
-            background-color: var(--vscode-button-secondaryHoverBackground);
+        /* Main */
+        .main-container {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            overflow: hidden;
+            min-width: 0;
         }
 
         .header {
-            padding: 10px 15px;
+            padding: var(--space-3) var(--space-4);
             border-bottom: 1px solid var(--vscode-panel-border);
             display: flex;
-            justify-content: space-between;
             align-items: center;
-            gap: 10px;
+            gap: var(--space-3);
+            min-height: 52px;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            flex: 1;
+            min-width: 0;
         }
 
         .sidebar-toggle {
-            background: none;
+            background: transparent;
             border: none;
             color: var(--vscode-foreground);
             cursor: pointer;
             padding: 6px;
-            border-radius: 3px;
+            border-radius: var(--radius-sm);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 14px;
             opacity: 0.7;
-            transition: opacity 0.2s;
+            transition: opacity var(--transition), background-color var(--transition);
+            flex-shrink: 0;
         }
+
+        .sidebar-toggle svg { width: 18px; height: 18px; }
 
         .sidebar-toggle:hover {
             opacity: 1;
             background-color: var(--vscode-toolbar-hoverBackground);
         }
 
-        .sidebar-toggle.collapsed {
-            transform: rotate(180deg);
-        }
-
-        .header-left {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            flex: 1;
-        }
-
-        .model-selector {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .model-selector select {
-            padding: 10px;
-            border: 1px solid var(--vscode-input-border);
-            background-color: var(--vscode-input-background);
-            color: var(--vscode-input-foreground);
-            border-radius: 4px;
-            font-family: inherit;
-            font-size: inherit;
-            height: 40px;
-            box-sizing: border-box;
-        }
-
-        .model-selector select:focus {
-            outline: 1px solid var(--vscode-focusBorder);
-            outline-offset: -1px;
-        }
-
-        .status {
-            font-size: 12px;
-            padding: 4px 8px;
-            border-radius: 4px;
-            background-color: var(--vscode-badge-background);
-        }
-
-        .status.connected {
-            background-color: #4caf50;
-            color: white;
-        }
-
-        .status.disconnected {
-            background-color: #f44336;
-            color: white;
-        }
-
-        .new-chat-button {
-            padding: 6px 12px;
-            background-color: var(--vscode-button-secondaryBackground);
-            color: var(--vscode-button-secondaryForeground);
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
+        .header-title {
+            font-size: 14px;
             font-weight: 600;
-            font-family: inherit;
-            transition: background-color 0.2s;
+            letter-spacing: -0.2px;
         }
 
-        .new-chat-button:hover {
-            background-color: var(--vscode-button-secondaryHoverBackground);
+        .status-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--space-2);
+            font-size: 12px;
+            color: var(--vscode-descriptionForeground);
+            padding: 5px 10px;
+            border-radius: 999px;
+            background-color: var(--vscode-input-background);
+            border: 1px solid var(--vscode-panel-border);
+            user-select: none;
         }
 
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #f44336;
+            box-shadow: 0 0 0 3px rgba(244, 67, 54, 0.18);
+            transition: background-color var(--transition), box-shadow var(--transition);
+        }
+
+        .status-indicator.connected .status-dot {
+            background-color: #4caf50;
+            box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.18);
+        }
+
+        /* Chat area */
         .chat-container {
             flex: 1;
             overflow-y: auto;
-            padding: 15px;
+            padding: var(--space-6) var(--space-5);
             display: flex;
             flex-direction: column;
-            gap: 15px;
+            gap: var(--space-5);
+            scroll-behavior: smooth;
         }
 
-        .message {
+        .empty-state {
+            flex: 1;
             display: flex;
             flex-direction: column;
-            max-width: 80%;
-            animation: fadeIn 0.3s;
+            align-items: center;
+            justify-content: center;
+            gap: var(--space-3);
+            color: var(--vscode-descriptionForeground);
+            text-align: center;
+            padding: var(--space-6);
+        }
+
+        .empty-state-icon {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background-color: var(--vscode-input-background);
+            border: 1px solid var(--vscode-panel-border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--vscode-foreground);
+            opacity: 0.7;
+            margin-bottom: var(--space-2);
+        }
+
+        .empty-state-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--vscode-foreground);
+        }
+
+        .empty-state-subtitle {
+            font-size: 12px;
+            opacity: 0.7;
+            max-width: 320px;
+            line-height: 1.5;
+        }
+
+        /* Messages */
+        .message {
+            display: flex;
+            flex-direction: row;
+            gap: var(--space-3);
+            max-width: 100%;
+            animation: fadeIn 240ms cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
+            from { opacity: 0; transform: translateY(6px); }
             to { opacity: 1; transform: translateY(0); }
         }
 
-        .message.user {
-            align-self: flex-end;
-        }
+        .message.user { flex-direction: row-reverse; }
 
-        .message.assistant {
-            align-self: flex-start;
-        }
-
-        .message-header {
-            font-size: 11px;
-            opacity: 0.7;
-            margin-bottom: 5px;
-            font-weight: 600;
+        .avatar {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            flex-shrink: 0;
             display: flex;
             align-items: center;
-            justify-content: space-between;
-            gap: 8px;
-        }
-
-        .message-actions {
-            display: flex;
-            gap: 4px;
-            opacity: 0;
-            transition: opacity 0.2s;
-        }
-
-        .message.user:hover .message-actions {
-            opacity: 1;
-        }
-
-        .edit-button {
-            background: none;
-            border: none;
-            color: var(--vscode-foreground);
-            cursor: pointer;
-            padding: 2px 6px;
-            font-size: 11px;
-            border-radius: 3px;
-            opacity: 0.7;
-        }
-
-        .edit-button:hover {
-            opacity: 1;
-            background-color: var(--vscode-button-hoverBackground);
-        }
-
-        .message.editing .message-content {
-            padding: 0;
-        }
-
-        .message-edit-textarea {
-            width: 100%;
-            padding: 10px 15px;
-            border: 1px solid var(--vscode-focusBorder);
-            background-color: var(--vscode-input-background);
-            color: var(--vscode-input-foreground);
-            border-radius: 8px;
-            font-family: inherit;
-            font-size: inherit;
-            resize: none;
-            min-height: 60px;
-            box-sizing: border-box;
-        }
-
-        .message-edit-textarea:focus {
-            outline: 1px solid var(--vscode-focusBorder);
-            outline-offset: -1px;
-        }
-
-        .edit-actions {
-            display: flex;
-            gap: 8px;
-            margin-top: 8px;
-            justify-content: flex-end;
-        }
-
-        .edit-actions button {
-            padding: 6px 12px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
+            justify-content: center;
             font-size: 12px;
             font-weight: 600;
+            margin-top: 18px;
         }
 
-        .edit-save {
+        .message.user .avatar {
             background-color: var(--vscode-button-background);
             color: var(--vscode-button-foreground);
         }
 
-        .edit-save:hover {
-            background-color: var(--vscode-button-hoverBackground);
-        }
-
-        .edit-cancel {
-            background-color: transparent;
+        .message.assistant .avatar {
+            background-color: var(--vscode-input-background);
             color: var(--vscode-foreground);
-            opacity: 0.7;
+            border: 1px solid var(--vscode-panel-border);
         }
 
-        .edit-cancel:hover {
+        .message-body {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-1);
+            max-width: 78%;
+            min-width: 0;
+        }
+
+        .message.user .message-body { align-items: flex-end; }
+        .message.editing .message-body { width: 100%; max-width: 100%; }
+
+        .message-header {
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--vscode-descriptionForeground);
+            padding: 0 var(--space-2);
+        }
+
+        .message-actions {
+            display: flex;
+            gap: 2px;
+            opacity: 0;
+            transition: opacity var(--transition);
+        }
+
+        .message:hover .message-actions { opacity: 1; }
+
+        .icon-button {
+            background: none;
+            border: none;
+            color: var(--vscode-foreground);
+            cursor: pointer;
+            padding: 3px 8px;
+            font-size: 11px;
+            font-weight: 500;
+            border-radius: var(--radius-sm);
+            opacity: 0.75;
+            transition: opacity var(--transition), background-color var(--transition);
+            font-family: inherit;
+        }
+
+        .icon-button:hover {
             opacity: 1;
-            background-color: var(--vscode-button-secondaryHoverBackground);
+            background-color: var(--vscode-toolbar-hoverBackground);
         }
 
         .message-content {
-            padding: 10px 15px;
-            border-radius: 8px;
-            line-height: 1.5;
+            padding: 10px 14px;
+            border-radius: var(--radius-lg);
+            line-height: 1.55;
             word-wrap: break-word;
+            font-size: 13.5px;
         }
+
+        .message.user .message-content {
+            background-color: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+            border-top-right-radius: var(--radius-sm);
+        }
+
+        .message.assistant .message-content {
+            background-color: var(--vscode-input-background);
+            border: 1px solid var(--vscode-panel-border);
+            border-top-left-radius: var(--radius-sm);
+        }
+
+        .message-content > *:first-child { margin-top: 0; }
+        .message-content > *:last-child { margin-bottom: 0; }
 
         .message-content h1,
         .message-content h2,
@@ -1067,14 +1165,11 @@ export class ChatPanel {
             margin-bottom: 0.5em;
             font-weight: 600;
         }
+        .message-content h1 { font-size: 1.4em; }
+        .message-content h2 { font-size: 1.2em; }
+        .message-content h3 { font-size: 1.05em; }
 
-        .message-content h1 { font-size: 1.5em; }
-        .message-content h2 { font-size: 1.3em; }
-        .message-content h3 { font-size: 1.1em; }
-
-        .message-content p {
-            margin: 0.5em 0;
-        }
+        .message-content p { margin: 0.5em 0; }
 
         .message-content ul,
         .message-content ol {
@@ -1082,26 +1177,24 @@ export class ChatPanel {
             padding-left: 1.5em;
         }
 
-        .message-content li {
-            margin: 0.25em 0;
-        }
+        .message-content li { margin: 0.25em 0; }
 
         .message-content code {
             background-color: var(--vscode-textCodeBlock-background);
             color: var(--vscode-textPreformat-foreground);
-            padding: 2px 4px;
-            border-radius: 3px;
+            padding: 1px 6px;
+            border-radius: 4px;
             font-family: var(--vscode-editor-font-family);
-            font-size: 0.9em;
+            font-size: 0.88em;
         }
 
         .message-content pre {
             background-color: var(--vscode-textCodeBlock-background);
             border: 1px solid var(--vscode-panel-border);
-            border-radius: 4px;
-            padding: 12px;
+            border-radius: var(--radius-md);
+            padding: 12px 14px;
             overflow-x: auto;
-            margin: 0.5em 0;
+            margin: 0.6em 0;
         }
 
         .message-content pre code {
@@ -1109,11 +1202,13 @@ export class ChatPanel {
             padding: 0;
             display: block;
             white-space: pre;
+            font-size: 0.9em;
+            line-height: 1.5;
         }
 
         .message-content blockquote {
-            border-left: 3px solid var(--vscode-panel-border);
-            padding-left: 1em;
+            border-left: 3px solid var(--vscode-focusBorder);
+            padding-left: 12px;
             margin: 0.5em 0;
             color: var(--vscode-descriptionForeground);
         }
@@ -1122,6 +1217,7 @@ export class ChatPanel {
             border-collapse: collapse;
             margin: 0.5em 0;
             width: 100%;
+            font-size: 0.92em;
         }
 
         .message-content table th,
@@ -1139,11 +1235,11 @@ export class ChatPanel {
         .message-content a {
             color: var(--vscode-textLink-foreground);
             text-decoration: none;
+            border-bottom: 1px solid transparent;
+            transition: border-color var(--transition);
         }
 
-        .message-content a:hover {
-            text-decoration: underline;
-        }
+        .message-content a:hover { border-bottom-color: currentColor; }
 
         .message-content hr {
             border: none;
@@ -1151,33 +1247,85 @@ export class ChatPanel {
             margin: 1em 0;
         }
 
-        .message.user .message-content {
+        /* Edit mode */
+        .message-edit-textarea {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid var(--vscode-focusBorder);
+            background-color: var(--vscode-input-background);
+            color: var(--vscode-input-foreground);
+            border-radius: var(--radius-lg);
+            font-family: inherit;
+            font-size: 13.5px;
+            resize: none;
+            min-height: 60px;
+            box-sizing: border-box;
+            line-height: 1.55;
+        }
+
+        .message-edit-textarea:focus {
+            outline: 1px solid var(--vscode-focusBorder);
+            outline-offset: 0;
+        }
+
+        .edit-actions {
+            display: flex;
+            gap: var(--space-2);
+            margin-top: var(--space-2);
+            justify-content: flex-end;
+        }
+
+        .edit-actions button {
+            padding: 6px 12px;
+            border: none;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            font-family: inherit;
+            transition: background-color var(--transition);
+        }
+
+        .edit-save {
             background-color: var(--vscode-button-background);
             color: var(--vscode-button-foreground);
         }
 
-        .message.assistant .message-content {
-            background-color: var(--vscode-input-background);
-            border: 1px solid var(--vscode-input-border);
+        .edit-save:hover { background-color: var(--vscode-button-hoverBackground); }
+
+        .edit-cancel {
+            background-color: transparent;
+            color: var(--vscode-foreground);
+            opacity: 0.75;
         }
 
-        .thinking-section {
-            margin-bottom: 10px;
-            border-bottom: 1px solid var(--vscode-panel-border);
-            padding-bottom: 10px;
+        .edit-cancel:hover {
+            opacity: 1;
+            background-color: var(--vscode-toolbar-hoverBackground);
         }
+
+        /* Thinking */
+        .thinking-section { margin-bottom: var(--space-2); }
 
         .thinking-header {
-            display: flex;
+            display: inline-flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
             cursor: pointer;
             user-select: none;
-            padding: 6px 0;
+            padding: 4px 10px;
             font-size: 11px;
             font-weight: 600;
             color: var(--vscode-descriptionForeground);
-            transition: color 0.2s;
+            background-color: var(--vscode-input-background);
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 999px;
+            transition: color var(--transition), background-color var(--transition);
+        }
+
+        .thinking-header:hover {
+            color: var(--vscode-foreground);
+            background-color: var(--vscode-toolbar-hoverBackground);
         }
 
         .thinking-header.shimmer span:last-child {
@@ -1198,23 +1346,15 @@ export class ChatPanel {
         }
 
         @keyframes shimmer {
-            0% {
-                background-position: 200% 0;
-            }
-            100% {
-                background-position: -200% 0;
-            }
-        }
-
-        .thinking-header:hover {
-            color: var(--vscode-foreground);
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
         }
 
         .thinking-icon {
-            width: 14px;
-            height: 14px;
-            display: inline-block;
-            transition: transform 0.2s;
+            width: 12px;
+            height: 12px;
+            display: inline-flex;
+            transition: transform var(--transition);
         }
 
         .thinking-header.collapsed .thinking-icon {
@@ -1222,11 +1362,11 @@ export class ChatPanel {
         }
 
         .thinking-content {
-            margin-top: 8px;
-            padding: 12px;
+            margin-top: var(--space-2);
+            padding: 12px 14px;
             background-color: var(--vscode-editor-background);
             border: 1px solid var(--vscode-panel-border);
-            border-radius: 6px;
+            border-radius: var(--radius-md);
             font-size: 12px;
             line-height: 1.6;
             color: var(--vscode-descriptionForeground);
@@ -1235,149 +1375,342 @@ export class ChatPanel {
             word-wrap: break-word;
             max-height: 400px;
             overflow-y: auto;
-            display: block;
         }
 
-        .thinking-content.collapsed {
-            display: none;
-        }
+        .thinking-content.collapsed { display: none; }
 
-        .thinking-content::-webkit-scrollbar {
-            width: 8px;
-        }
-
-        .thinking-content::-webkit-scrollbar-track {
-            background: transparent;
-        }
-
-        .thinking-content::-webkit-scrollbar-thumb {
-            background: var(--vscode-scrollbarSlider-background);
-            border-radius: 4px;
-        }
-
-        .thinking-content::-webkit-scrollbar-thumb:hover {
-            background: var(--vscode-scrollbarSlider-hoverBackground);
-        }
-
-        .input-container {
-            padding: 15px;
+        /* Input */
+        .input-wrapper {
+            padding: var(--space-3) var(--space-4) var(--space-4);
             border-top: 1px solid var(--vscode-panel-border);
-            display: flex;
-            gap: 10px;
         }
 
-        .input-container textarea {
-            flex: 1;
-            padding: 10px;
+        .input-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: var(--space-2);
+            padding: 0 var(--space-1);
+        }
+
+        .model-selector-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .model-selector-label {
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground);
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+        }
+
+        .model-selector-wrapper select {
+            padding: 4px 8px;
             border: 1px solid var(--vscode-input-border);
             background-color: var(--vscode-input-background);
             color: var(--vscode-input-foreground);
-            border-radius: 4px;
+            border-radius: var(--radius-sm);
             font-family: inherit;
-            font-size: inherit;
-            resize: none;
-            min-height: 40px;
-            height: 40px;
-            max-height: 150px;
-            box-sizing: border-box;
-            overflow-y: auto;
+            font-size: 12px;
+            cursor: pointer;
+            outline: none;
+            transition: border-color var(--transition);
         }
 
-        .input-container textarea:focus {
+        .model-selector-wrapper select:hover { border-color: var(--vscode-focusBorder); }
+        .model-selector-wrapper select:focus {
             outline: 1px solid var(--vscode-focusBorder);
             outline-offset: -1px;
         }
 
-        .input-container button {
-            padding: 0;
+        .input-hint {
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground);
+            opacity: 0.6;
+        }
+
+        .input-container {
+            position: relative;
+            display: flex;
+            align-items: flex-end;
+            gap: var(--space-2);
+            padding: var(--space-2);
+            border: 1px solid var(--vscode-input-border);
+            background-color: var(--vscode-input-background);
+            border-radius: var(--radius-lg);
+            transition: border-color var(--transition), box-shadow var(--transition);
+        }
+
+        .input-container:focus-within {
+            border-color: var(--vscode-focusBorder);
+        }
+
+        .input-container textarea {
+            flex: 1;
+            padding: 6px 8px;
+            border: none;
+            background-color: transparent;
+            color: var(--vscode-input-foreground);
+            font-family: inherit;
+            font-size: 13.5px;
+            resize: none;
+            min-height: 32px;
+            height: 32px;
+            max-height: 200px;
+            outline: none;
+            line-height: 1.5;
+        }
+
+        .input-container textarea::placeholder {
+            color: var(--vscode-input-placeholderForeground);
+            opacity: 0.7;
+        }
+
+        .send-button {
+            flex-shrink: 0;
+            width: 32px;
+            height: 32px;
             background-color: var(--vscode-button-background);
             color: var(--vscode-button-foreground);
             border: none;
-            border-radius: 4px;
+            border-radius: var(--radius-md);
             cursor: pointer;
-            font-weight: 600;
-            height: 40px;
-            width: 40px;
             display: flex;
             align-items: center;
             justify-content: center;
-            box-sizing: border-box;
-        }
-        
-        .input-container button .button-icon {
-            width: 16px;
-            height: 16px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .input-container button .button-text {
-            display: none;
+            transition: background-color var(--transition), transform var(--transition);
+            padding: 0;
         }
 
-        .input-container button:hover {
+        .send-button:hover:not(:disabled) {
             background-color: var(--vscode-button-hoverBackground);
         }
 
-        .input-container button:disabled {
+        .send-button:active:not(:disabled) { transform: scale(0.96); }
+
+        .send-button:disabled {
             opacity: 0.5;
             cursor: not-allowed;
         }
 
+        .send-button svg { width: 16px; height: 16px; }
+
+        /* Error */
         .error {
-            padding: 10px;
-            margin: 10px;
+            padding: 10px 12px;
+            margin: var(--space-3) 0;
             background-color: var(--vscode-inputValidation-errorBackground);
             border: 1px solid var(--vscode-inputValidation-errorBorder);
-            border-radius: 4px;
+            border-radius: var(--radius-md);
             color: var(--vscode-errorForeground);
+            font-size: 12.5px;
         }
 
-        .empty-state {
-            flex: 1;
+        /* Context menu */
+        .context-menu {
+            position: fixed;
+            background-color: var(--vscode-menu-background);
+            border: 1px solid var(--vscode-menu-border);
+            border-radius: var(--radius-md);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+            z-index: 1000;
+            min-width: 150px;
+            padding: 4px;
+            display: none;
+        }
+
+        .context-menu-item {
+            padding: 6px 10px;
+            cursor: pointer;
+            font-size: 13px;
+            color: var(--vscode-menu-foreground);
+            user-select: none;
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .context-menu-item:hover {
+            background-color: var(--vscode-menu-selectionBackground);
+            color: var(--vscode-menu-selectionForeground);
+        }
+
+        .context-menu-item.danger { color: #e57373; }
+        .context-menu-item.danger:hover {
+            background-color: rgba(229, 115, 115, 0.15);
+            color: #ef5350;
+        }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background-color: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(2px);
             display: flex;
             align-items: center;
             justify-content: center;
+            z-index: 2000;
+            animation: modalFadeIn 180ms ease-out;
+        }
+
+        @keyframes modalFadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .modal-content {
+            background-color: var(--vscode-quickInput-background);
+            border: 1px solid var(--vscode-quickInput-border);
+            border-radius: var(--radius-lg);
+            padding: var(--space-5);
+            min-width: 420px;
+            max-width: 520px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+            animation: modalSlideIn 220ms cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        @keyframes modalSlideIn {
+            from { opacity: 0; transform: translateY(-12px) scale(0.98); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        .modal-header {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: var(--space-4);
+            color: var(--vscode-quickInput-foreground);
+        }
+
+        .modal-message {
+            margin-bottom: var(--space-4);
             color: var(--vscode-descriptionForeground);
-            text-align: center;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .modal-input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid var(--vscode-input-border);
+            background-color: var(--vscode-input-background);
+            color: var(--vscode-input-foreground);
+            border-radius: var(--radius-sm);
+            font-family: inherit;
+            font-size: 13px;
+        }
+
+        .modal-input:focus {
+            outline: 1px solid var(--vscode-focusBorder);
+            outline-offset: -1px;
+            border-color: var(--vscode-focusBorder);
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: var(--space-2);
+            justify-content: flex-end;
+            margin-top: var(--space-4);
+        }
+
+        .modal-button {
+            padding: 7px 14px;
+            border: none;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            font-family: inherit;
+            transition: background-color var(--transition);
+        }
+
+        .modal-button.primary {
+            background-color: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+        }
+
+        .modal-button.primary:hover {
+            background-color: var(--vscode-button-hoverBackground);
+        }
+
+        .modal-button.danger {
+            background-color: #d32f2f;
+            color: white;
+        }
+
+        .modal-button.danger:hover { background-color: #b71c1c; }
+
+        .modal-button.secondary {
+            background-color: transparent;
+            color: var(--vscode-foreground);
+        }
+
+        .modal-button.secondary:hover {
+            background-color: var(--vscode-toolbar-hoverBackground);
         }
     </style>
 </head>
 <body>
     <div class="chat-sidebar" id="chatSidebar">
-        <div class="sidebar-header">Chat History</div>
+        <div class="sidebar-header">
+            <div class="sidebar-title">Chats</div>
+            <button class="sidebar-new-chat" id="newChatButton" title="New chat">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+                <span>New chat</span>
+            </button>
+        </div>
         <div class="chat-list" id="chatList"></div>
         <div class="context-menu" id="contextMenu">
-            <div class="context-menu-item" id="renameMenuItem">Rename</div>
-            <div class="context-menu-item" id="deleteMenuItem">Delete</div>
+            <div class="context-menu-item" id="renameMenuItem">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                <span>Rename</span>
+            </div>
+            <div class="context-menu-item danger" id="deleteMenuItem">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                <span>Delete</span>
+            </div>
         </div>
     </div>
     <div class="main-container">
         <div class="header">
             <div class="header-left">
-                <button id="sidebarToggle" class="sidebar-toggle" title="Toggle Sidebar">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-left-icon lucide-chevron-left"><path d="m15 18-6-6 6-6"/></svg>
+                <button id="sidebarToggle" class="sidebar-toggle" title="Toggle sidebar">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
                 </button>
-                <h3>Ollama Chat</h3>
-                <button id="newChatButton" class="new-chat-button" title="New Chat">New Chat</button>
+                <div class="header-title">Ollama Chat</div>
             </div>
-            <span id="status" class="status disconnected">Disconnected</span>
+            <div class="status-indicator" id="status">
+                <span class="status-dot"></span>
+                <span id="statusText">Disconnected</span>
+            </div>
         </div>
         <div class="chat-container" id="chatContainer">
-            <div class="empty-state">Start chatting with Ollama...</div>
+            <div class="empty-state">
+                <div class="empty-state-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                </div>
+                <div class="empty-state-title">Start a conversation</div>
+                <div class="empty-state-subtitle">Type a message below to chat with your local Ollama model.</div>
+            </div>
         </div>
-        <div class="input-container">
-        <textarea id="messageInput" placeholder="Type your message..." rows="1"></textarea>
-        <div class="model-selector">
-            <select id="modelSelect">
-                <option value="">Loading...</option>
-            </select>
-        </div>
-        <button id="sendButton">
-            <span class="button-icon" id="sendIcon">▶</span>
-            <span class="button-text">Send</span>
-        </button>
+        <div class="input-wrapper">
+            <div class="input-toolbar">
+                <div class="model-selector-wrapper">
+                    <span class="model-selector-label">Model</span>
+                    <select id="modelSelect">
+                        <option value="">Loading...</option>
+                    </select>
+                </div>
+                <span class="input-hint">Enter to send · Shift+Enter for new line</span>
+            </div>
+            <div class="input-container">
+                <textarea id="messageInput" placeholder="Send a message..." rows="1"></textarea>
+                <button id="sendButton" class="send-button" title="Send (Enter)"></button>
+            </div>
         </div>
     </div>
 
@@ -1386,8 +1719,8 @@ export class ChatPanel {
         const chatContainer = document.getElementById('chatContainer');
         const messageInput = document.getElementById('messageInput');
         const sendButton = document.getElementById('sendButton');
-        const sendIcon = document.getElementById('sendIcon');
         const status = document.getElementById('status');
+        const statusText = document.getElementById('statusText');
         const modelSelect = document.getElementById('modelSelect');
         const newChatButton = document.getElementById('newChatButton');
         const sidebarToggle = document.getElementById('sidebarToggle');
@@ -1396,6 +1729,13 @@ export class ChatPanel {
         const contextMenu = document.getElementById('contextMenu');
         const renameMenuItem = document.getElementById('renameMenuItem');
         const deleteMenuItem = document.getElementById('deleteMenuItem');
+
+        const SEND_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>';
+        const STOP_SVG = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+        const ASSISTANT_AVATAR = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>';
+        const CHEVRON_LEFT = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>';
+        const CHEVRON_RIGHT = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>';
+
         let isLoading = false;
         let userMessageIdCounter = 0;
         let currentChatId = null;
@@ -1405,28 +1745,37 @@ export class ChatPanel {
         let pendingOperations = new Set();
         let sidebarCollapsed = false;
 
+        function setSendIcon(loading) {
+            sendButton.innerHTML = loading ? STOP_SVG : SEND_SVG;
+        }
+
+        function formatRelativeTime(timestamp) {
+            const now = Date.now();
+            const diff = now - timestamp;
+            const minute = 60 * 1000;
+            const hour = 60 * minute;
+            const day = 24 * hour;
+            if (diff < minute) return 'Just now';
+            if (diff < hour) return Math.floor(diff / minute) + 'm ago';
+            if (diff < day) return Math.floor(diff / hour) + 'h ago';
+            if (diff < 7 * day) return Math.floor(diff / day) + 'd ago';
+            return new Date(timestamp).toLocaleDateString();
+        }
+
+        function applySidebarState() {
+            if (sidebarCollapsed) {
+                chatSidebar.classList.add('collapsed');
+                sidebarToggle.innerHTML = CHEVRON_RIGHT;
+            } else {
+                chatSidebar.classList.remove('collapsed');
+                sidebarToggle.innerHTML = CHEVRON_LEFT;
+            }
+        }
+
         function toggleSidebar() {
             sidebarCollapsed = !sidebarCollapsed;
-            if (chatSidebar) {
-                if (sidebarCollapsed) {
-                    chatSidebar.classList.add('collapsed');
-                } else {
-                    chatSidebar.classList.remove('collapsed');
-                }
-            }
-            if (sidebarToggle) {
-                if (sidebarCollapsed) {
-                    sidebarToggle.classList.add('collapsed');
-                    sidebarToggle.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-right-icon lucide-chevron-right"><path d="m9 18 6-6-6-6"/></svg>';
-                } else {
-                    sidebarToggle.classList.remove('collapsed');
-                    sidebarToggle.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-left-icon lucide-chevron-left"><path d="m15 18-6-6 6-6"/></svg>';
-                }
-            }
-            vscode.postMessage({
-                command: 'toggleSidebar',
-                collapsed: sidebarCollapsed
-            });
+            applySidebarState();
+            vscode.postMessage({ command: 'toggleSidebar', collapsed: sidebarCollapsed });
         }
 
         function renderMarkdown(content) {
@@ -1437,67 +1786,89 @@ export class ChatPanel {
 
         function updateStatus(connected) {
             if (connected) {
-                status.textContent = 'Connected';
-                status.className = 'status connected';
+                statusText.textContent = 'Connected';
+                status.classList.add('connected');
             } else {
-                status.textContent = 'Disconnected';
-                status.className = 'status disconnected';
+                statusText.textContent = 'Disconnected';
+                status.classList.remove('connected');
             }
         }
 
-        function addMessage(role, content, messageId, thinking) {
+        function ensureNotEmpty() {
             const emptyState = chatContainer.querySelector('.empty-state');
-            if (emptyState) {
-                emptyState.remove();
+            if (emptyState) emptyState.remove();
+        }
+
+        function buildAvatar(role) {
+            const av = document.createElement('div');
+            av.className = 'avatar';
+            if (role === 'user') {
+                av.textContent = 'U';
+            } else {
+                av.innerHTML = ASSISTANT_AVATAR;
             }
+            return av;
+        }
+
+        function showEmptyState() {
+            chatContainer.innerHTML = ''
+                + '<div class="empty-state">'
+                + '<div class="empty-state-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>'
+                + '<div class="empty-state-title">Start a conversation</div>'
+                + '<div class="empty-state-subtitle">Type a message below to chat with your local Ollama model.</div>'
+                + '</div>';
+        }
+
+        function addMessage(role, content, messageId, thinking) {
+            ensureNotEmpty();
 
             const messageDiv = document.createElement('div');
-            messageDiv.className = \`message \${role}\`;
+            messageDiv.className = 'message ' + role;
             if (role === 'user' && messageId !== undefined) {
                 messageDiv.dataset.messageId = messageId;
             }
-            
+
+            messageDiv.appendChild(buildAvatar(role));
+
+            const body = document.createElement('div');
+            body.className = 'message-body';
+
             const header = document.createElement('div');
             header.className = 'message-header';
-            
             const headerText = document.createElement('span');
             headerText.textContent = role === 'user' ? 'You' : 'Ollama';
             header.appendChild(headerText);
-            
+
             if (role === 'user') {
                 const actions = document.createElement('div');
                 actions.className = 'message-actions';
-                
                 const editButton = document.createElement('button');
-                editButton.className = 'edit-button';
+                editButton.className = 'icon-button';
                 editButton.textContent = 'Edit';
                 editButton.title = 'Edit message';
-                editButton.addEventListener('click', () => {
-                    editUserMessage(messageDiv);
-                });
-                
+                editButton.addEventListener('click', () => editUserMessage(messageDiv));
                 actions.appendChild(editButton);
                 header.appendChild(actions);
             }
-            
-            messageDiv.appendChild(header);
-            
+
+            body.appendChild(header);
+
             if (role === 'assistant') {
                 const thinkingSection = document.createElement('div');
                 thinkingSection.className = 'thinking-section';
                 thinkingSection.style.display = 'none';
-                
+
                 const thinkingHeader = document.createElement('div');
                 thinkingHeader.className = 'thinking-header collapsed';
-                thinkingHeader.innerHTML = '<span class="thinking-icon">▼</span><span>Thinking</span>';
-                
+                thinkingHeader.innerHTML = '<svg class="thinking-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg><span>Thinking</span>';
+
                 const thinkingContent = document.createElement('div');
                 thinkingContent.className = 'thinking-content collapsed';
                 thinkingContent.textContent = '';
-                
+
                 thinkingHeader.addEventListener('click', () => {
-                    const isCollapsed = thinkingHeader.classList.contains('collapsed');
-                    if (isCollapsed) {
+                    const collapsed = thinkingHeader.classList.contains('collapsed');
+                    if (collapsed) {
                         thinkingHeader.classList.remove('collapsed');
                         thinkingContent.classList.remove('collapsed');
                     } else {
@@ -1505,19 +1876,19 @@ export class ChatPanel {
                         thinkingContent.classList.add('collapsed');
                     }
                 });
-                
+
                 thinkingSection.appendChild(thinkingHeader);
                 thinkingSection.appendChild(thinkingContent);
-                messageDiv.appendChild(thinkingSection);
+                body.appendChild(thinkingSection);
                 messageDiv._thinkingSection = thinkingSection;
                 messageDiv._thinkingContent = thinkingContent;
-                
+
                 if (thinking && thinking.trim()) {
                     thinkingContent.textContent = thinking;
                     thinkingSection.style.display = 'block';
                 }
             }
-            
+
             const contentDiv = document.createElement('div');
             contentDiv.className = 'message-content';
             if (role === 'assistant') {
@@ -1525,34 +1896,31 @@ export class ChatPanel {
             } else {
                 contentDiv.textContent = content;
             }
-            
-            messageDiv.appendChild(contentDiv);
-            
+            body.appendChild(contentDiv);
+
+            messageDiv.appendChild(body);
             chatContainer.appendChild(messageDiv);
-            
             chatContainer.scrollTop = chatContainer.scrollHeight;
             return contentDiv;
         }
 
         function editUserMessage(messageDiv) {
-            if (messageDiv.classList.contains('editing')) {
-                return;
-            }
+            if (messageDiv.classList.contains('editing')) return;
 
             const messageId = parseInt(messageDiv.dataset.messageId);
             const contentDiv = messageDiv.querySelector('.message-content');
             const originalText = contentDiv.textContent;
 
             messageDiv.classList.add('editing');
-            
+
             const textarea = document.createElement('textarea');
             textarea.className = 'message-edit-textarea';
             textarea.value = originalText;
             textarea.rows = Math.max(3, originalText.split('\\n').length);
-            
+
             const editActions = document.createElement('div');
             editActions.className = 'edit-actions';
-            
+
             const saveButton = document.createElement('button');
             saveButton.className = 'edit-save';
             saveButton.textContent = 'Save & Resend';
@@ -1567,23 +1935,22 @@ export class ChatPanel {
                 }
                 cancelEdit(messageDiv, originalText);
             });
-            
+
             const cancelButton = document.createElement('button');
             cancelButton.className = 'edit-cancel';
             cancelButton.textContent = 'Cancel';
-            cancelButton.addEventListener('click', () => {
-                cancelEdit(messageDiv, originalText);
-            });
-            
+            cancelButton.addEventListener('click', () => cancelEdit(messageDiv, originalText));
+
             editActions.appendChild(saveButton);
             editActions.appendChild(cancelButton);
-            
+
             contentDiv.replaceWith(textarea);
-            messageDiv.appendChild(editActions);
-            
+            const body = messageDiv.querySelector('.message-body');
+            body.appendChild(editActions);
+
             textarea.focus();
             textarea.setSelectionRange(textarea.value.length, textarea.value.length);
-            
+
             textarea.addEventListener('keydown', (e) => {
                 if (e.key === 'Escape') {
                     cancelEdit(messageDiv, originalText);
@@ -1598,45 +1965,32 @@ export class ChatPanel {
             messageDiv.classList.remove('editing');
             const textarea = messageDiv.querySelector('.message-edit-textarea');
             const editActions = messageDiv.querySelector('.edit-actions');
-            
+
             const contentDiv = document.createElement('div');
             contentDiv.className = 'message-content';
             contentDiv.textContent = originalText;
-            
-            if (textarea) textarea.remove();
-            if (editActions) editActions.remove();
-            
-            const header = messageDiv.querySelector('.message-header');
-            if (header) {
-                header.insertAdjacentElement('afterend', contentDiv);
-            } else {
-                messageDiv.appendChild(contentDiv);
+
+            if (textarea) {
+                textarea.replaceWith(contentDiv);
             }
+            if (editActions) editActions.remove();
         }
 
         function editMessage(messageId, newContent) {
-            const messageDiv = chatContainer.querySelector(\`[data-message-id="\${messageId}"]\`);
+            const messageDiv = chatContainer.querySelector('[data-message-id="' + messageId + '"]');
             if (messageDiv) {
                 const contentDiv = messageDiv.querySelector('.message-content');
-                if (contentDiv) {
-                    contentDiv.textContent = newContent;
-                }
+                if (contentDiv) contentDiv.textContent = newContent;
             }
         }
 
         function removeMessagesAfter(messageId) {
-            const messageDiv = chatContainer.querySelector(\`[data-message-id="\${messageId}"]\`);
+            const messageDiv = chatContainer.querySelector('[data-message-id="' + messageId + '"]');
             if (!messageDiv) return;
-            
             let removeNext = false;
-            const messages = Array.from(chatContainer.querySelectorAll('.message'));
-            
-            messages.forEach(msg => {
-                if (removeNext) {
-                    msg.remove();
-                } else if (msg === messageDiv) {
-                    removeNext = true;
-                }
+            Array.from(chatContainer.querySelectorAll('.message')).forEach(msg => {
+                if (removeNext) msg.remove();
+                else if (msg === messageDiv) removeNext = true;
             });
         }
 
@@ -1661,14 +2015,10 @@ export class ChatPanel {
                     if (thinking && thinking.trim()) {
                         lastMessage._thinkingContent.textContent = thinking;
                         lastMessage._thinkingSection.style.display = 'block';
-                        if (thinkingHeader) {
-                            thinkingHeader.classList.add('shimmer');
-                        }
+                        if (thinkingHeader) thinkingHeader.classList.add('shimmer');
                     } else {
                         lastMessage._thinkingSection.style.display = 'none';
-                        if (thinkingHeader) {
-                            thinkingHeader.classList.remove('shimmer');
-                        }
+                        if (thinkingHeader) thinkingHeader.classList.remove('shimmer');
                     }
                     chatContainer.scrollTop = chatContainer.scrollHeight;
                 }
@@ -1683,6 +2033,20 @@ export class ChatPanel {
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
 
+        function removeEmptyAssistantPlaceholder() {
+            const messages = chatContainer.querySelectorAll('.message.assistant');
+            if (messages.length === 0) return;
+            const last = messages[messages.length - 1];
+            const contentDiv = last.querySelector('.message-content');
+            const hasText = contentDiv && (contentDiv.textContent || '').trim().length > 0;
+            const hasMarkup = contentDiv && contentDiv.innerHTML.trim().length > 0;
+            const thinkingSection = last._thinkingSection;
+            const hasThinking = thinkingSection && thinkingSection.style.display !== 'none';
+            if (!hasText && !hasMarkup && !hasThinking) {
+                last.remove();
+            }
+        }
+
         messageInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -1691,72 +2055,53 @@ export class ChatPanel {
         });
 
         messageInput.addEventListener('input', () => {
-            messageInput.style.height = '40px';
-            messageInput.style.height = Math.min(messageInput.scrollHeight, 150) + 'px';
+            messageInput.style.height = '32px';
+            messageInput.style.height = Math.min(messageInput.scrollHeight, 200) + 'px';
         });
 
         sendButton.addEventListener('click', () => {
-            if (isLoading) {
-                stopMessage();
-            } else {
-                sendMessage();
-            }
+            if (isLoading) stopMessage();
+            else sendMessage();
         });
 
         function sendMessage() {
             const text = messageInput.value.trim();
-            if (!text || isLoading) {
-                return;
-            }
+            if (!text || isLoading) return;
 
             isLoading = true;
             sendButton.disabled = false;
             messageInput.disabled = true;
-            if (sendIcon) {
-                sendIcon.textContent = '■';
-            }
+            setSendIcon(true);
 
-            vscode.postMessage({
-                command: 'sendMessage',
-                text: text
-            });
+            vscode.postMessage({ command: 'sendMessage', text: text });
 
             messageInput.value = '';
-            messageInput.style.height = '40px';
+            messageInput.style.height = '32px';
         }
-        
+
         function stopMessage() {
-            if (!isLoading) {
-                return;
-            }
-            
-            vscode.postMessage({
-                command: 'stopMessage'
-            });
-            
+            if (!isLoading) return;
+            vscode.postMessage({ command: 'stopMessage' });
             isLoading = false;
             sendButton.disabled = false;
             messageInput.disabled = false;
-            if (sendIcon) {
-                sendIcon.textContent = '▶';
-            }
+            setSendIcon(false);
             messageInput.focus();
         }
 
         window.addEventListener('message', event => {
             const message = event.data;
-
             switch (message.command) {
                 case 'addMessage':
-                    const msgId = message.message.id !== undefined ? message.message.id : (message.message.role === 'user' ? userMessageIdCounter++ : undefined);
+                    const msgId = message.message.id !== undefined
+                        ? message.message.id
+                        : (message.message.role === 'user' ? userMessageIdCounter++ : undefined);
                     addMessage(message.message.role, message.message.content, msgId, message.message.thinking);
                     if (message.message.role === 'assistant') {
                         isLoading = false;
                         sendButton.disabled = false;
                         messageInput.disabled = false;
-                        if (sendIcon) {
-                            sendIcon.textContent = '▶';
-                        }
+                        setSendIcon(false);
                         messageInput.focus();
                     }
                     break;
@@ -1773,6 +2118,7 @@ export class ChatPanel {
                     updateLastThinking(message.thinking);
                     break;
                 case 'error':
+                    removeEmptyAssistantPlaceholder();
                     showError(message.message);
                     isLoading = false;
                     if (contextMenuChatId && pendingOperations.has(contextMenuChatId)) {
@@ -1785,41 +2131,47 @@ export class ChatPanel {
                     }
                     sendButton.disabled = false;
                     messageInput.disabled = false;
-                    if (sendIcon) {
-                        sendIcon.textContent = '▶';
-                    }
+                    setSendIcon(false);
                     messageInput.focus();
                     break;
                 case 'connectionStatus':
                     updateStatus(message.connected);
                     break;
                 case 'clearChat':
-                    chatContainer.innerHTML = '<div class="empty-state">Start chatting with Ollama...</div>';
+                    showEmptyState();
                     userMessageIdCounter = 0;
                     currentChatId = null;
                     break;
                 case 'messageStopped':
+                    removeEmptyAssistantPlaceholder();
                     isLoading = false;
                     sendButton.disabled = false;
                     messageInput.disabled = false;
-                    if (sendIcon) {
-                        sendIcon.textContent = '▶';
-                    }
+                    setSendIcon(false);
                     messageInput.focus();
                     break;
                 case 'modelsList':
                     if (modelSelect) {
                         modelSelect.innerHTML = '';
                         if (message.models && message.models.length > 0) {
+                            let matched = false;
                             message.models.forEach(model => {
                                 const option = document.createElement('option');
                                 option.value = model;
                                 option.textContent = model;
                                 if (model === message.selectedModel) {
                                     option.selected = true;
+                                    matched = true;
                                 }
                                 modelSelect.appendChild(option);
                             });
+                            if (!matched && modelSelect.options.length > 0) {
+                                modelSelect.options[0].selected = true;
+                                vscode.postMessage({
+                                    command: 'selectModel',
+                                    model: modelSelect.options[0].value
+                                });
+                            }
                         } else {
                             const option = document.createElement('option');
                             option.value = '';
@@ -1850,14 +2202,11 @@ export class ChatPanel {
                             addMessage(msg.role, msg.content, msg.id, msg.thinking);
                         });
                     } else {
-                        chatContainer.innerHTML = '<div class="empty-state">Start chatting with Ollama...</div>';
+                        showEmptyState();
                     }
                     if (message.model && modelSelect) {
-                        const options = Array.from(modelSelect.options);
-                        options.forEach(opt => {
-                            if (opt.value === message.model) {
-                                opt.selected = true;
-                            }
+                        Array.from(modelSelect.options).forEach(opt => {
+                            if (opt.value === message.model) opt.selected = true;
                         });
                     }
                     break;
@@ -1870,9 +2219,7 @@ export class ChatPanel {
                         contextMenuChatId = null;
                         contextMenuChatName = null;
                     }
-                    if (message.wasCurrentChat) {
-                        currentChatId = null;
-                    }
+                    if (message.wasCurrentChat) currentChatId = null;
                     break;
                 case 'chatRenamed':
                     if (pendingOperations.has(message.chatId)) {
@@ -1886,15 +2233,7 @@ export class ChatPanel {
                     break;
                 case 'setSidebarState':
                     sidebarCollapsed = message.collapsed;
-                    if (sidebarCollapsed) {
-                        chatSidebar.classList.add('collapsed');
-                        sidebarToggle.classList.add('collapsed');
-                        sidebarToggle.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-right-icon lucide-chevron-right"><path d="m9 18 6-6-6-6"/></svg>';
-                    } else {
-                        chatSidebar.classList.remove('collapsed');
-                        sidebarToggle.classList.remove('collapsed');
-                        sidebarToggle.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-left-icon lucide-chevron-left"><path d="m15 18-6-6 6-6"/></svg>';
-                    }
+                    applySidebarState();
                     break;
             }
         });
@@ -1906,106 +2245,94 @@ export class ChatPanel {
         modelSelect.addEventListener('change', (e) => {
             const selectedModel = e.target.value;
             if (selectedModel) {
-                vscode.postMessage({
-                    command: 'selectModel',
-                    model: selectedModel
-                });
+                vscode.postMessage({ command: 'selectModel', model: selectedModel });
             }
         });
 
         function renderChatHistory(chats, activeChatId) {
             if (!chatList) return;
-            
+
             chatList.innerHTML = '';
             currentChatId = activeChatId;
-            
+
             if (chats.length === 0) {
-                const emptyMsg = document.createElement('div');
-                emptyMsg.style.padding = '10px';
-                emptyMsg.style.color = 'var(--vscode-descriptionForeground)';
-                emptyMsg.style.fontSize = '12px';
-                emptyMsg.textContent = 'No saved chats';
-                chatList.appendChild(emptyMsg);
+                const empty = document.createElement('div');
+                empty.className = 'chat-list-empty';
+                empty.textContent = 'No saved chats yet';
+                chatList.appendChild(empty);
                 return;
             }
-            
+
             chats.forEach(chat => {
-                const chatItem = document.createElement('div');
-                chatItem.className = 'chat-item';
-                if (chat.id === activeChatId) {
-                    chatItem.classList.add('active');
-                }
-                
-                const nameSpan = document.createElement('span');
-                nameSpan.className = 'chat-item-name';
-                nameSpan.textContent = chat.name;
-                nameSpan.title = chat.name;
-                
-                chatItem.appendChild(nameSpan);
-                
-                chatItem.addEventListener('click', () => {
+                const item = document.createElement('div');
+                item.className = 'chat-item';
+                if (chat.id === activeChatId) item.classList.add('active');
+
+                const name = document.createElement('div');
+                name.className = 'chat-item-name';
+                name.textContent = chat.name;
+                name.title = chat.name;
+
+                const time = document.createElement('div');
+                time.className = 'chat-item-time';
+                time.textContent = formatRelativeTime(chat.updatedAt);
+
+                item.appendChild(name);
+                item.appendChild(time);
+
+                item.addEventListener('click', () => {
                     if (chat.id !== activeChatId) {
-                        vscode.postMessage({
-                            command: 'loadChat',
-                            chatId: chat.id
-                        });
+                        vscode.postMessage({ command: 'loadChat', chatId: chat.id });
                     }
                 });
-                
-                chatItem.addEventListener('contextmenu', (e) => {
+
+                item.addEventListener('contextmenu', (e) => {
                     e.preventDefault();
                     e.stopPropagation();
                     showContextMenu(e, chat.id, chat.name);
                 });
-                
-                chatList.appendChild(chatItem);
+
+                chatList.appendChild(item);
             });
         }
 
         function showContextMenu(event, chatId, chatName) {
-            if (!contextMenu || isOperationInProgress || pendingOperations.has(chatId)) {
-                return;
-            }
-            
+            if (!contextMenu || isOperationInProgress || pendingOperations.has(chatId)) return;
+
             contextMenuChatId = chatId;
             contextMenuChatName = chatName;
-            
+
             contextMenu.style.display = 'block';
-            contextMenu.style.left = event.clientX + 'px';
-            contextMenu.style.top = event.clientY + 'px';
-            
+            const menuRect = contextMenu.getBoundingClientRect();
+            let left = event.clientX;
+            let top = event.clientY;
+            if (left + menuRect.width > window.innerWidth) left = window.innerWidth - menuRect.width - 8;
+            if (top + menuRect.height > window.innerHeight) top = window.innerHeight - menuRect.height - 8;
+            contextMenu.style.left = left + 'px';
+            contextMenu.style.top = top + 'px';
+
             const hideMenu = (e) => {
                 if (contextMenu && !contextMenu.contains(e.target)) {
                     contextMenu.style.display = 'none';
                     document.removeEventListener('click', hideMenu);
                 }
             };
-            
-            setTimeout(() => {
-                document.addEventListener('click', hideMenu);
-            }, 0);
+
+            setTimeout(() => document.addEventListener('click', hideMenu), 0);
         }
 
         if (renameMenuItem) {
             renameMenuItem.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                
                 const chatId = contextMenuChatId;
                 const chatName = contextMenuChatName;
-                
                 if (!chatId || !chatName || isOperationInProgress || pendingOperations.has(chatId)) {
-                    if (contextMenu) {
-                        contextMenu.style.display = 'none';
-                    }
+                    if (contextMenu) contextMenu.style.display = 'none';
                     return;
                 }
-                
-                if (contextMenu) {
-                    contextMenu.style.display = 'none';
-                }
-                
-                renameChat(chatId, chatName);
+                if (contextMenu) contextMenu.style.display = 'none';
+                showRenameDialog(chatId, chatName);
             });
         }
 
@@ -2013,31 +2340,14 @@ export class ChatPanel {
             deleteMenuItem.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                
                 const chatId = contextMenuChatId;
-                
                 if (!chatId || isOperationInProgress || pendingOperations.has(chatId)) {
-                    if (contextMenu) {
-                        contextMenu.style.display = 'none';
-                    }
+                    if (contextMenu) contextMenu.style.display = 'none';
                     return;
                 }
-                
-                if (contextMenu) {
-                    contextMenu.style.display = 'none';
-                }
-                
-                deleteChat(chatId);
+                if (contextMenu) contextMenu.style.display = 'none';
+                showDeleteDialog(chatId, contextMenuChatName);
             });
-        }
-        
-        function renameChat(chatId, currentName) {
-            showRenameDialog(chatId, currentName);
-        }
-        
-        function deleteChat(chatId) {
-            const chatName = contextMenuChatName;
-            showDeleteDialog(chatId, chatName);
         }
 
         if (newChatButton) {
@@ -2047,24 +2357,18 @@ export class ChatPanel {
         }
 
         if (sidebarToggle) {
-            sidebarToggle.addEventListener('click', () => {
-                toggleSidebar();
-            });
+            sidebarToggle.addEventListener('click', toggleSidebar);
         }
 
+        setSendIcon(false);
         vscode.postMessage({ command: 'checkConnection' });
         vscode.postMessage({ command: 'getSidebarState' });
         vscode.postMessage({ command: 'getChatHistory' });
         loadModels();
-        setInterval(() => {
-            vscode.postMessage({ command: 'checkConnection' });
-        }, 5000);
+        setInterval(() => vscode.postMessage({ command: 'checkConnection' }), 5000);
 
-        // Modal dialog functions
         function showRenameDialog(chatId, currentName) {
-            if (isOperationInProgress || pendingOperations.has(chatId)) {
-                return;
-            }
+            if (isOperationInProgress || pendingOperations.has(chatId)) return;
 
             const overlay = document.createElement('div');
             overlay.className = 'modal-overlay';
@@ -2074,7 +2378,7 @@ export class ChatPanel {
 
             const header = document.createElement('div');
             header.className = 'modal-header';
-            header.textContent = 'Rename Chat';
+            header.textContent = 'Rename chat';
 
             const input = document.createElement('input');
             input.className = 'modal-input';
@@ -2088,45 +2392,33 @@ export class ChatPanel {
             const cancelButton = document.createElement('button');
             cancelButton.className = 'modal-button secondary';
             cancelButton.textContent = 'Cancel';
-            cancelButton.onclick = function() {
-                document.body.removeChild(overlay);
-            };
+            cancelButton.onclick = () => document.body.removeChild(overlay);
 
             const saveButton = document.createElement('button');
             saveButton.className = 'modal-button primary';
             saveButton.textContent = 'Rename';
-            saveButton.onclick = function() {
+            saveButton.onclick = () => {
                 const newName = input.value.trim();
                 if (!newName) {
                     showError('Chat name cannot be empty');
                     return;
                 }
-
                 if (newName === currentName) {
                     document.body.removeChild(overlay);
                     return;
                 }
-
                 if (newName.length > 100) {
                     showError('Chat name is too long (max 100 characters)');
                     return;
                 }
-
                 isOperationInProgress = true;
                 pendingOperations.add(chatId);
-
-                vscode.postMessage({
-                    command: 'renameChat',
-                    chatId: chatId,
-                    newName: newName
-                });
-
+                vscode.postMessage({ command: 'renameChat', chatId: chatId, newName: newName });
                 document.body.removeChild(overlay);
             };
 
             actions.appendChild(cancelButton);
             actions.appendChild(saveButton);
-
             content.appendChild(header);
             content.appendChild(input);
             content.appendChild(actions);
@@ -2136,19 +2428,14 @@ export class ChatPanel {
             input.focus();
             input.select();
 
-            input.onkeydown = function(e) {
-                if (e.key === 'Enter') {
-                    saveButton.click();
-                } else if (e.key === 'Escape') {
-                    cancelButton.click();
-                }
+            input.onkeydown = (e) => {
+                if (e.key === 'Enter') saveButton.click();
+                else if (e.key === 'Escape') cancelButton.click();
             };
         }
 
         function showDeleteDialog(chatId, chatName) {
-            if (isOperationInProgress || pendingOperations.has(chatId)) {
-                return;
-            }
+            if (isOperationInProgress || pendingOperations.has(chatId)) return;
 
             const overlay = document.createElement('div');
             overlay.className = 'modal-overlay';
@@ -2158,13 +2445,11 @@ export class ChatPanel {
 
             const header = document.createElement('div');
             header.className = 'modal-header';
-            header.textContent = 'Delete Chat';
+            header.textContent = 'Delete chat?';
 
             const message = document.createElement('div');
-            message.style.marginBottom = '16px';
-            message.style.color = 'var(--vscode-foreground)';
-            message.style.fontSize = '13px';
-            message.innerHTML = 'Are you sure you want to delete "' + chatName + '"? <br>This action cannot be undone.';
+            message.className = 'modal-message';
+            message.textContent = 'Are you sure you want to delete "' + chatName + '"? This action cannot be undone.';
 
             const actions = document.createElement('div');
             actions.className = 'modal-actions';
@@ -2172,30 +2457,20 @@ export class ChatPanel {
             const cancelButton = document.createElement('button');
             cancelButton.className = 'modal-button secondary';
             cancelButton.textContent = 'Cancel';
-            cancelButton.onclick = function() {
-                document.body.removeChild(overlay);
-            };
+            cancelButton.onclick = () => document.body.removeChild(overlay);
 
             const deleteButton = document.createElement('button');
-            deleteButton.className = 'modal-button primary';
+            deleteButton.className = 'modal-button danger';
             deleteButton.textContent = 'Delete';
-            deleteButton.style.backgroundColor = 'var(--vscode-errorForeground)';
-            deleteButton.style.color = 'var(--vscode-button-background)';
-            deleteButton.onclick = function() {
+            deleteButton.onclick = () => {
                 isOperationInProgress = true;
                 pendingOperations.add(chatId);
-
-                vscode.postMessage({
-                    command: 'deleteChat',
-                    chatId: chatId
-                });
-
+                vscode.postMessage({ command: 'deleteChat', chatId: chatId });
                 document.body.removeChild(overlay);
             };
 
             actions.appendChild(cancelButton);
             actions.appendChild(deleteButton);
-
             content.appendChild(header);
             content.appendChild(message);
             content.appendChild(actions);
@@ -2204,12 +2479,9 @@ export class ChatPanel {
             document.body.appendChild(overlay);
             deleteButton.focus();
 
-            overlay.onkeydown = function(e) {
-                if (e.key === 'Enter') {
-                    deleteButton.click();
-                } else if (e.key === 'Escape') {
-                    cancelButton.click();
-                }
+            overlay.onkeydown = (e) => {
+                if (e.key === 'Enter') deleteButton.click();
+                else if (e.key === 'Escape') cancelButton.click();
             };
         }
     </script>
