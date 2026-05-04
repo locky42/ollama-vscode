@@ -6,6 +6,7 @@
     "engines": {
         "vscode": "^1.74.0"
     },
+    "packageManager": "bun@1.2.3",
     "publisher": "MauroKrekels",
     "license": "MIT",
     "galleryBanner": {
@@ -57,8 +58,8 @@
         "watch": "tsc -watch -p ./"
     },
     "devDependencies": {
-        "@types/vscode": "^1.74.0",
-        "@types/node": "16.x",
-        "typescript": "^4.9.4"
+        "@types/vscode": "^1.118.0",
+        "@types/node": "^16.18.126",
+        "typescript": "^4.9.5"
     }
 }
