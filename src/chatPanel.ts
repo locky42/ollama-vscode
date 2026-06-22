@@ -765,17 +765,16 @@ export class ChatPanel {
     }
 
     private _getHtmlForWebview(webview: vscode.Webview) {
-        const vscode = require('vscode');
         const fs = require('fs');
 
         const cssUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this._extensionUri, 'src', 'assets', 'css', 'panel.css')
+            vscode.Uri.joinPath(this._extensionUri, 'media', 'assets', 'css', 'panel.css')
         );
         const jsUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this._extensionUri, 'src', 'assets', 'js', 'panel.js')
+            vscode.Uri.joinPath(this._extensionUri, 'media', 'assets', 'js', 'panel.js')
         );
 
-        const htmlUri = vscode.Uri.joinPath(this._extensionUri, 'src', 'templates', 'panel.html');
+        const htmlUri = vscode.Uri.joinPath(this._extensionUri, 'media', 'templates', 'panel.html');
         const htmlPath = htmlUri.fsPath;
         let html = fs.readFileSync(htmlPath, 'utf8');
 
