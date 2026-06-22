@@ -1,0 +1,61 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Ollama Local Chat">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.25" y2="1">
+      <stop offset="0" stop-color="#4A5CA6"/>
+      <stop offset="0.55" stop-color="#2C356B"/>
+      <stop offset="1" stop-color="#1D2247"/>
+    </linearGradient>
+    <linearGradient id="cream" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FCF4E3"/>
+      <stop offset="1" stop-color="#E9D8B8"/>
+    </linearGradient>
+    <linearGradient id="muzzle" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFB088"/>
+      <stop offset="1" stop-color="#F58B5C"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.38" r="0.62">
+      <stop offset="0" stop-color="#6376CE" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#6376CE" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="headClip">
+      <path d="M64 37 C80 37 90 49 90 68 C90 84 82 96 70 101 C66 103 62 103 58 101 C46 96 38 84 38 68 C38 49 48 37 64 37 Z"/>
+    </clipPath>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="4"/>
+    </filter>
+  </defs>
+
+  <rect x="0" y="0" width="128" height="128" rx="28" fill="url(#bg)"/>
+  <rect x="0" y="0" width="128" height="128" rx="28" fill="url(#glow)"/>
+
+  <!-- ears -->
+  <path d="M46 47 C39 32 36 19 43 11 C49 18 52 31 53 46 Z" fill="url(#cream)"/>
+  <path d="M82 47 C89 32 92 19 85 11 C79 18 76 31 75 46 Z" fill="url(#cream)"/>
+  <path d="M45 42 C42 32 42 23 45 17 C49 23 50 32 50 42 Z" fill="#E0CBA0"/>
+  <path d="M83 42 C86 32 86 23 83 17 C79 23 78 32 78 42 Z" fill="#E0CBA0"/>
+
+  <!-- head -->
+  <path d="M64 37 C80 37 90 49 90 68 C90 84 82 96 70 101 C66 103 62 103 58 101 C46 96 38 84 38 68 C38 49 48 37 64 37 Z" fill="url(#cream)"/>
+
+  <!-- soft top sheen, clipped to head -->
+  <g clip-path="url(#headClip)">
+    <ellipse cx="64" cy="46" rx="24" ry="16" fill="#FFFFFF" fill-opacity="0.28" filter="url(#soft)"/>
+  </g>
+
+  <!-- eyes -->
+  <circle cx="53" cy="64" r="5.4" fill="#2A2342"/>
+  <circle cx="75" cy="64" r="5.4" fill="#2A2342"/>
+  <circle cx="51.3" cy="62.1" r="1.7" fill="#FFFFFF"/>
+  <circle cx="73.3" cy="62.1" r="1.7" fill="#FFFFFF"/>
+
+  <!-- muzzle -->
+  <path d="M64 76 C71.5 76 76 80 76 87 C76 95.5 70.5 100 64 100 C57.5 100 52 95.5 52 87 C52 80 56.5 76 64 76 Z" fill="url(#muzzle)"/>
+  <ellipse cx="59.6" cy="86" rx="1.9" ry="2.3" fill="#C9542F"/>
+  <ellipse cx="68.4" cy="86" rx="1.9" ry="2.3" fill="#C9542F"/>
+  <path d="M58.5 92.5 C61 95 67 95 69.5 92.5" fill="none" stroke="#C9542F" stroke-width="2.8" stroke-linecap="round"/>
+
+  <!-- chat typing dots -->
+  <circle cx="55" cy="114" r="3" fill="#FCF4E3"/>
+  <circle cx="64" cy="114" r="3" fill="#FCF4E3" fill-opacity="0.72"/>
+  <circle cx="73" cy="114" r="3" fill="#FCF4E3" fill-opacity="0.44"/>
+</svg>

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="media/icon.png" width="128" height="128" alt="Ollama Local Chat icon" />
+</p>
+
 # Ollama Local Chat
 
 VS Code extension to chat with a local Ollama instance inside the editor—similar to Copilot-style chat but using your own models.

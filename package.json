@@ -9,6 +9,7 @@
     "packageManager": "bun@1.2.3",
     "publisher": "MauroKrekels",
     "license": "MIT",
+    "icon": "media/icon.png",
     "galleryBanner": {
         "color": "#000000",
         "theme": "dark"
